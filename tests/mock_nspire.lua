@@ -91,13 +91,21 @@ local function new_gc(ops)
     int_arg("drawLine", "x2", x2); int_arg("drawLine", "y2", y2)
     rec("drawLine", x1, y1, x2, y2)
   end
+  -- copia la tabla al registrar: la app puede reutilizar su tabla de puntos
+  local function copy_pts(t)
+    local c = {}
+    for i = 1, #t do c[i] = t[i] end
+    return c
+  end
   function gc:drawPolyLine(t)
     assert(type(t) == "table", "drawPolyLine: se espera una tabla")
-    rec("drawPolyLine", t)
+    if mock.strict then for i = 1, #t do int_arg("drawPolyLine", "p" .. i, t[i]) end end
+    rec("drawPolyLine", copy_pts(t))
   end
   function gc:fillPolygon(t)
     assert(type(t) == "table", "fillPolygon: se espera una tabla")
-    rec("fillPolygon", t)
+    if mock.strict then for i = 1, #t do int_arg("fillPolygon", "p" .. i, t[i]) end end
+    rec("fillPolygon", copy_pts(t))
   end
   function gc:drawArc(x, y, w, h, a, b) rec("drawArc", x, y, w, h, a, b) end
   function gc:fillArc(x, y, w, h, a, b) rec("fillArc", x, y, w, h, a, b) end
@@ -254,6 +262,33 @@ function mock.click(x, y)
   local on = assert(mock.env, "load_app primero").on
   if on.mouseDown then on.mouseDown(x, y) end
   if on.mouseUp then on.mouseUp(x, y) end
+end
+
+-- Raton: down/up/move sueltos y arrastre (down -> move... -> up).
+function mock.down(x, y)
+  local on = assert(mock.env, "load_app primero").on
+  if on.mouseDown then on.mouseDown(x, y) end
+end
+function mock.up(x, y)
+  local on = assert(mock.env, "load_app primero").on
+  if on.mouseUp then on.mouseUp(x, y) end
+end
+function mock.move(x, y)
+  local on = assert(mock.env, "load_app primero").on
+  if on.mouseMove then on.mouseMove(x, y) end
+end
+function mock.drag(x1, y1, x2, y2, steps)
+  steps = steps or 4
+  mock.down(x1, y1)
+  for i = 1, steps do
+    mock.move(math.floor(x1 + (x2 - x1) * i / steps + 0.5), math.floor(y1 + (y2 - y1) * i / steps + 0.5))
+  end
+  mock.up(x2, y2)
+end
+-- Mantener clic (grabDown): llega con x,y = 0 y suprime el mouseUp.
+function mock.grab()
+  local on = assert(mock.env, "load_app primero").on
+  if on.grabDown then on.grabDown(0, 0) end
 end
 
 function mock.tick()
