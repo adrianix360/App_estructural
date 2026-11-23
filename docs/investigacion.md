@@ -50,3 +50,5 @@ diagramas N/Q/M con el momento del lado traccionado, deformada con factor de esc
 ## 6. Pendiente de probar en el equipo real
 
 `mouseMove` sin clic, `grabDown`, `math.evalStr("expand(...)")` y `"∫(...)"`, velocidad de `on.paint` con diagramas de 20 barras.
+
+**Prueba en equipo real (2026-11-23):** Adrián transfirió `Estructural.tns` (v0.4) a su CX II CAS y reporta que funciona correctamente. Aún falta confirmar uno por uno los puntos de arriba (origen de las ecuaciones: CAS o motor propio; glifos δ, θ, ²).
