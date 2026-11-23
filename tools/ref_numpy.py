@@ -529,6 +529,9 @@ def procesar(nombre, m):
 def main(argv):
     os.makedirs(os.path.join(RAIZ, "tests", "ref"), exist_ok=True)
     archivos = sorted(glob.glob(os.path.join(RAIZ, "tests", "casos", "*.json")))
+    with open(os.path.join(RAIZ, "tests", "ref", "indice.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump([os.path.splitext(os.path.basename(a))[0] for a in archivos], f)
+        f.write("\n")
     if argv:
         archivos = [a for a in archivos if os.path.splitext(os.path.basename(a))[0] in argv]
     if not archivos:
