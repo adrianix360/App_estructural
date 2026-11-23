@@ -35,6 +35,8 @@ un solo estado de carga, sin P-Δ, sin deformación por cortante.
   - `N(x)` positivo = **tracción**: `N(x) = −Fxi − ∫₀ˣ qx`.
   - `V(x)` = `Fyi + ∫₀ˣ qy` (+ cargas puntuales a la izquierda). Cumple `V = dM/dx`.
   - `M(x)` positivo = **comprime la fibra +y local** (en viga horizontal i→j: positivo = tracción abajo, "sonrisa"): `M(x) = −Mi + Fyi·x + ∫₀ˣ qy(s)(x−s)ds` (+ cargas/momentos puntuales).
+  - Momento puntual `m` (antihorario +) en `a`: para `x > a`, `M(x)` recibe `−m`. En un salto (P o m interiores) se reportan ambos límites (izquierda y derecha) en el mismo x.
+  - Resorte en un GDL cuenta como una reacción incógnita en la clasificación; la reacción reportada es la total del GDL (apoyo + resorte).
   - `θ(x) = θi + ∫ M/EI`, `v(x) = vi + ∫ θ` (desplazamiento transversal local), `u(x) = ui + ∫ N/EA`. Comprobación: `v(L)`, `θ(L)`, `u(L)` deben coincidir con el extremo j (tolerancia relativa 1e-9).
 - Dibujo: M se dibuja **del lado traccionado** (como Ftool); N y V positivos hacia +y local. Leyenda en pantalla.
 
@@ -89,6 +91,15 @@ E.global(res, e, x, escala)  --> X, Y   -- posición deformada en coordenadas gl
 local P = require("core.poly")  -- polinomios {c0, c1, ...}: eval, add, scale, integ(p, c), deriv, roots_in(p, a, b), tostring(p, "x", dec)
 local LA = require("core.linalg") -- mat(n,m), solve(K, F) -> x | nil, info ; rank(B, tol) -> r
 ```
+Extensiones del contrato (implementadas en `src/core/`):
+- `S.clasificar(modelo)` devuelve `cl, err`; si el modelo no valida, `cl.tipo = "inestable"` y `cl.msg = err.msg`.
+- `res.equilibrio` añade `rel` (residuo relativo = máx(|ΣFx|,|ΣFy|)/Σ|F| y |ΣM|/Σ|F·brazo|).
+- `res.barras[e]` añade `ni, nj, xi, yi`, `tramos[k] = {x0, x1, N, V, M, th, y, u}` (polinomios en x local sin desplazar; `y` = v) y `verif = {v, th, u, rel}` (error de v(L), θ(L), u(L) frente a `dl`). Los construye `E.construir(modelo, res)`, llamado por `S.resolver`.
+- `E.ecuaciones` añade `u`; `E.eval` en un quiebre devuelve el lado derecho; `E.muestras` repite el x en saltos (valor izquierdo y derecho); el campo `"th"` (giro) también es válido en muestras/extremos/ceros.
+- Polinomios: `p[1]` = término independiente. Extras en `core.poly`: `sub, mul, shift, trim, grado`. `core.linalg`: `solve(K, F, n, inplace)` → `x | nil, indice_gdl`.
+- Asentamientos (`dx, dy, drz`) solo se aplican a GDL restringidos (`ux/uy/rz = true`); en GDL con resorte se ignoran. Barras `cercha` pueden omitir `I`.
+- `E.extremos`: extremos de barra, puntos críticos y picos en quiebres; una meseta se informa una sola vez.
+
 Restricciones: sin variables globales; módulos devuelven tabla; nada de `io`/`os` en `src/` (no existen en la calculadora).
 
 ## 6. UI (`src/ui/`, `src/main.lua`)
