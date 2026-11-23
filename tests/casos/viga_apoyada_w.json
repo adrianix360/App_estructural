@@ -1,0 +1,95 @@
+{
+ "ver": 1,
+ "nombre": "viga_apoyada_w",
+ "desc": "Viga simplemente apoyada L=6, w=-10 kN/m GY (1 barra)",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 6.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 6.0,
+     "w1": -10.0,
+     "w2": -10.0,
+     "dir": "GY"
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 30.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 30.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 3.0,
+   "c": "M",
+   "v": 45.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 3.0,
+   "c": "v",
+   "v": -0.0084375,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 3.0,
+   "c": "V",
+   "v": 0.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "clasif",
+   "tipo": "isostatica",
+   "grado": 0
+  }
+ ]
+}

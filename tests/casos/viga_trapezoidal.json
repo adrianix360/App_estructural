@@ -1,0 +1,113 @@
+{
+ "ver": 1,
+ "nombre": "viga_trapezoidal",
+ "desc": "Viga apoyada L=8, carga trapezoidal parcial 2..6 de -4 a -12",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 8.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 2.0,
+     "b": 6.0,
+     "w1": -4.0,
+     "w2": -12.0,
+     "dir": "GY"
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 14.666666666666664,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 17.333333333333336,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 2.0,
+   "c": "M",
+   "v": 29.33333333333333,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 6.0,
+   "c": "M",
+   "v": 34.66666666666667,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 1.0,
+   "c": "V",
+   "v": 14.666666666666664,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 7.0,
+   "c": "V",
+   "v": -17.333333333333336,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 8.0,
+   "c": "M",
+   "v": 0.0,
+   "lado": "+",
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "isostatica",
+   "grado": 0
+  }
+ ]
+}

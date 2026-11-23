@@ -1,0 +1,129 @@
+{
+ "ver": 1,
+ "nombre": "continua_2tramos_w",
+ "desc": "Viga continua 2 tramos de 5 m, w=-10 en ambos",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 5.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 10.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -10.0,
+     "w2": -10.0,
+     "dir": "GY"
+    }
+   ]
+  },
+  {
+   "ni": 2,
+   "nj": 3,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -10.0,
+     "w2": -10.0,
+     "dir": "GY"
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 62.5,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 18.75,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 3,
+   "c": "ry",
+   "v": 18.75,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 5.0,
+   "c": "M",
+   "v": -31.25,
+   "lado": "-",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 2,
+   "x": 0.0,
+   "c": "M",
+   "v": -31.25,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "uy",
+   "v": 0.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 1
+  }
+ ]
+}

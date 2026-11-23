@@ -1,0 +1,148 @@
+{
+ "ver": 1,
+ "nombre": "portal_lateral",
+ "desc": "Portal empotrado h=4 L=6 EI constante, carga lateral fx=20 en nodo 2 (A=1000)",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 0,
+   "y": 4.0,
+   "carga": {
+    "fx": 20.0,
+    "fy": 0,
+    "mz": 0
+   }
+  },
+  {
+   "x": 6.0,
+   "y": 4.0
+  },
+  {
+   "x": 6.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 1000.0,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 3,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 1000.0,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 3,
+   "nj": 4,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 1000.0,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  }
+ ],
+ "esperado": [
+  {
+   "t": "sumaR",
+   "c": "rx",
+   "v": -20.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "sumaR",
+   "c": "ry",
+   "v": 0.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "rx",
+   "v": -10.0,
+   "tol": 0.0001
+  },
+  {
+   "t": "reac",
+   "nodo": 4,
+   "c": "rx",
+   "v": -10.0,
+   "tol": 0.0001
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "mz",
+   "v": 24.000000000000004,
+   "tol": 0.0001
+  },
+  {
+   "t": "reac",
+   "nodo": 4,
+   "c": "mz",
+   "v": 24.000000000000004,
+   "tol": 0.0001
+  },
+  {
+   "t": "reac",
+   "nodo": 4,
+   "c": "ry",
+   "v": 5.333333333333332,
+   "tol": 0.0001
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": -5.333333333333332,
+   "tol": 0.0001
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "ux",
+   "v": 0.004266666666666667,
+   "tol": 0.0001
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "rz",
+   "v": -0.0008,
+   "tol": 0.0001
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 3
+  }
+ ]
+}

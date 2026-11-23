@@ -1,0 +1,108 @@
+{
+ "ver": 1,
+ "nombre": "asentamiento_empotrada",
+ "desc": "Empotrada-empotrada L=6, asentamiento dy=-0.01 en el nodo 2",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 6.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true,
+    "dy": -0.01
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 11.11111111111111,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": -11.11111111111111,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "mz",
+   "v": 33.333333333333336,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "mz",
+   "v": 33.333333333333336,
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "uy",
+   "v": -0.01,
+   "tol": 1e-09
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 0.0,
+   "c": "M",
+   "v": -33.333333333333336,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 6.0,
+   "c": "M",
+   "v": 33.333333333333336,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 3.0,
+   "c": "M",
+   "v": 0.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 3
+  }
+ ]
+}

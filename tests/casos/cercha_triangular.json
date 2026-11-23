@@ -1,0 +1,133 @@
+{
+ "ver": 1,
+ "nombre": "cercha_triangular",
+ "desc": "Cercha triangular base 4 altura 3, carga vertical -30 en el vertice",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 4,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 2,
+   "y": 3,
+   "carga": {
+    "fx": 0,
+    "fy": -30.0,
+    "mz": 0
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 1,
+   "nj": 3,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 3,
+   "nj": 2,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 15.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 15.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "rx",
+   "v": 0.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 0.0,
+   "c": "N",
+   "v": 10.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 2,
+   "x": 0.0,
+   "c": "N",
+   "v": -18.027756377319946,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 3,
+   "x": 0.0,
+   "c": "N",
+   "v": -18.027756377319946,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 2,
+   "x": 1.8027756377319946,
+   "c": "M",
+   "v": 0.0,
+   "lado": "+",
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "isostatica",
+   "grado": 0
+  }
+ ]
+}

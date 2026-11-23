@@ -1,0 +1,235 @@
+{
+ "ver": 1,
+ "nombre": "marco_2pisos",
+ "desc": "Marco de 2 pisos y 2 vanos, 9 nodos 10 barras, w=-20/-12 en vigas, fx=25 y 15 laterales",
+ "nodos": [
+  {
+   "x": 0.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 5.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 10.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 0.0,
+   "y": 3.5,
+   "carga": {
+    "fx": 25,
+    "fy": 0,
+    "mz": 0
+   }
+  },
+  {
+   "x": 5.0,
+   "y": 3.5
+  },
+  {
+   "x": 10.0,
+   "y": 3.5
+  },
+  {
+   "x": 0.0,
+   "y": 7.0,
+   "carga": {
+    "fx": 15,
+    "fy": 0,
+    "mz": 0
+   }
+  },
+  {
+   "x": 5.0,
+   "y": 7.0
+  },
+  {
+   "x": 10.0,
+   "y": 7.0
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 4,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 4,
+   "nj": 7,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 5,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 5,
+   "nj": 8,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 3,
+   "nj": 6,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 6,
+   "nj": 9,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 4,
+   "nj": 5,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -20.0,
+     "w2": -20.0,
+     "dir": "GY"
+    }
+   ]
+  },
+  {
+   "ni": 5,
+   "nj": 6,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -20.0,
+     "w2": -20.0,
+     "dir": "GY"
+    }
+   ]
+  },
+  {
+   "ni": 7,
+   "nj": 8,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -12.0,
+     "w2": -12.0,
+     "dir": "GY"
+    }
+   ]
+  },
+  {
+   "ni": 8,
+   "nj": 9,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 5.0,
+     "w1": -12.0,
+     "w2": -12.0,
+     "dir": "GY"
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "sumaR",
+   "c": "rx",
+   "v": -40.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "sumaR",
+   "c": "ry",
+   "v": 320.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 11
+  }
+ ]
+}

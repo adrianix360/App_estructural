@@ -1,0 +1,100 @@
+{
+ "ver": 1,
+ "nombre": "voladizo_P",
+ "desc": "Voladizo L=4, empotrado en 1, carga nodal fy=-15 en el extremo",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 4.0,
+   "y": 0,
+   "carga": {
+    "fx": 0,
+    "fy": -15.0,
+    "mz": 0
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 15.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "mz",
+   "v": 60.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 0.0,
+   "c": "M",
+   "v": -60.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 4.0,
+   "c": "M",
+   "v": 0.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "uy",
+   "v": -0.016,
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "rz",
+   "v": -0.006,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 4.0,
+   "c": "v",
+   "v": -0.016,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "clasif",
+   "tipo": "isostatica",
+   "grado": 0
+  }
+ ]
+}

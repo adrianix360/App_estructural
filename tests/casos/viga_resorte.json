@@ -1,0 +1,121 @@
+{
+ "ver": 1,
+ "nombre": "viga_resorte",
+ "desc": "Viga L=6 w=-10, apoyos 1 y 3 y resorte vertical k=5000 en nodo 2 (centro)",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 3.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": false,
+    "rz": false,
+    "ky": 5000.0
+   }
+  },
+  {
+   "x": 6.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 3.0,
+     "w1": -10.0,
+     "w2": -10.0,
+     "dir": "GY"
+    }
+   ]
+  },
+  {
+   "ni": 2,
+   "nj": 3,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "w",
+     "a": 0,
+     "b": 3.0,
+     "w1": -10.0,
+     "w2": -10.0,
+     "dir": "GY"
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 19.852941176470587,
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "uy",
+   "v": -0.003970588235294117,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 20.073529411764707,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 3,
+   "c": "ry",
+   "v": 20.073529411764707,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 3.0,
+   "c": "M",
+   "v": 15.220588235294116,
+   "lado": "-",
+   "tol": 1e-06
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 1
+  }
+ ]
+}

@@ -1,0 +1,171 @@
+{
+ "ver": 1,
+ "nombre": "cercha_7barras",
+ "desc": "Cercha de 5 nodos y 7 barras (2 cordones, 2 diagonales extremas, 2 interiores), cargas -20 y -40",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 4,
+   "y": 0
+  },
+  {
+   "x": 8,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  },
+  {
+   "x": 2,
+   "y": 3,
+   "carga": {
+    "fx": 0,
+    "fy": -20.0,
+    "mz": 0
+   }
+  },
+  {
+   "x": 6,
+   "y": 3,
+   "carga": {
+    "fx": 0,
+    "fy": -40.0,
+    "mz": 0
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 3,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 4,
+   "nj": 5,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 1,
+   "nj": 4,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 3,
+   "nj": 5,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 4,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 5,
+   "tipo": "cercha",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": []
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": 25.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 3,
+   "c": "ry",
+   "v": 35.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 1.0,
+   "c": "N",
+   "v": 16.666666666666668,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 4,
+   "x": 0.0,
+   "c": "N",
+   "v": -30.046260628866577,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "sumaR",
+   "c": "ry",
+   "v": 60.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "isostatica",
+   "grado": 0
+  }
+ ]
+}
