@@ -64,7 +64,8 @@ local function registrar_menu()
     { "Propiedades globales",
       { "E, A, I y tipo de barra (P)", H.props_globales } },
     { "Ayuda",
-      { "Guia rapida (H)", H.ayuda } },
+      { "Guia rapida (H)", H.ayuda },
+      { "Leyenda de signos (L)", H.leyenda } },
   })
 end
 

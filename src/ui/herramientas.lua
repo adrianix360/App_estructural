@@ -50,9 +50,30 @@ local DEF = {
   { id = "undo" }, { id = "redo" }, { id = "fit" }, { id = "zmas" }, { id = "zmenos" },
 }
 
+-- Barra de herramientas del modo resultados (botones con texto; vista = sub-vista que activan)
+local DEFR = {
+  { id = "r_reac", vista = "reac", txt = "Reac", w = 30 }, { id = "r_N", vista = "N", txt = "N", w = 20 },
+  { id = "r_V", vista = "V", txt = "V", w = 20 }, { id = "r_M", vista = "M", txt = "M", w = 20 },
+  { id = "r_def", vista = "def", txt = "Def", w = 26 }, { id = "r_tabla", vista = "tabla", txt = "Tabla", w = 32 },
+  { id = "r_ecs", vista = "ecs", txt = "Ecs", w = 26 }, "sep",
+  { id = "r_mas", txt = "+", w = 20 }, { id = "r_menos", txt = "-", w = 20 }, "sep",
+  { id = "r_volver", txt = "Modelar", w = 44 },
+}
+
 local function layout_botones()
   H.botones = {}
   local x = 4
+  if Res.modo then
+    for i = 1, #DEFR do
+      local d = DEFR[i]
+      if d == "sep" then x = x + 8
+      else
+        H.botones[#H.botones + 1] = { id = d.id, vista = d.vista, txt = d.txt, x = x, y = 1, w = d.w, h = H.TB_H - 3 }
+        x = x + d.w + 2
+      end
+    end
+    return
+  end
   for i = 1, #DEF do
     local d = DEF[i]
     if d == "sep" then x = x + 10
@@ -82,6 +103,24 @@ function H.init()
     Res.invalidar()
     if document and document.markChanged then document.markChanged() end
     redraw()
+  end
+  Res.barra_sel = function()
+    local s = H.sel
+    if s and s.t == "barra" and ED.m.barras[s.i] then return s.i end
+    return nil
+  end
+  Res.on_modo = function(antes, ahora)
+    if antes == nil and ahora ~= nil then
+      H.tool_prev = H.tool
+      H.tool = "sel"
+      H.barra_a = nil
+    elseif antes ~= nil and ahora == nil then
+      if H.tool_prev then H.tool = H.tool_prev end
+      H.tool_prev = nil
+    end
+    forma_cursor = nil
+    layout_botones()
+    H.msg = nil
   end
   layout_botones()
 end
@@ -161,6 +200,7 @@ local est_key = {}
 local est_txt = ""
 
 function H.texto_estado()
+  if Res.modo then return Res.estado() or "" end
   local t, s, a, v = H.tool, H.sel, H.barra_a, H.ver
   if est_key.t == t and est_key.s == s and est_key.si == (s and s.i) and est_key.a == a and est_key.v == v
      and est_key.d == (drag ~= nil) then
@@ -194,27 +234,38 @@ function H.texto_estado()
   return r
 end
 
-local ct = { en = nil, wx = nil, wy = nil, nn = nil, nb = nil, si = nil, s = "" }
+local ct = { en = nil, wx = nil, wy = nil, nn = nil, nb = nil, si = nil, cv = nil, s = "" }
 function H.texto_coord()
   local hv, m = H.hover, ED.m
+  Res.clasif()
+  local cls = Res.clasif_texto()
+  if Res.modo then
+    if Res.cur then return "" end
+    return cls
+  end
   local nn, nb = #m.nodos, #m.barras
   local en = hv.en_lienzo
   local st = V.snap_valor()
-  if ct.en == en and ct.wx == hv.wx and ct.wy == hv.wy and ct.nn == nn and ct.nb == nb and ct.si == V.snap_i then
+  if ct.en == en and ct.wx == hv.wx and ct.wy == hv.wy and ct.nn == nn and ct.nb == nb and ct.si == V.snap_i
+     and ct.cv == Res.cl_ver then
     return ct.s
   end
-  ct.en, ct.wx, ct.wy, ct.nn, ct.nb, ct.si = en, hv.wx, hv.wy, nn, nb, V.snap_i
-  local sn = (st and st > 0) and ("snap " .. fmt(st)) or "libre"
-  if en then
-    ct.s = "x=" .. fmt(hv.wx) .. " y=" .. fmt(hv.wy) .. " m | " .. nn .. "N " .. nb .. "B | " .. sn
-  else
-    ct.s = nn .. "N " .. nb .. "B | " .. sn
+  ct.en, ct.wx, ct.wy, ct.nn, ct.nb, ct.si, ct.cv = en, hv.wx, hv.wy, nn, nb, V.snap_i, Res.cl_ver
+  -- clasificacion siempre visible; coordenadas y snap si caben
+  local s = cls
+  local coord = en and ("x=" .. fmt(hv.wx) .. " y=" .. fmt(hv.wy)) or nil
+  if coord then s = (s ~= "") and (coord .. " | " .. s) or coord end
+  if nn == 0 or s == "" then
+    local sn = (st and st > 0) and ("snap " .. fmt(st)) or "libre"
+    s = (s ~= "") and (s .. " | " .. sn) or (nn .. "N " .. nb .. "B | " .. sn)
   end
+  ct.s = s
   return ct.s
 end
 
 -- ---------------------------------------------------------- acciones basicas
 function H.set_tool(t)
+  if Res.modo then H.salir_resultados() end
   H.tool = t
   H.barra_a = nil
   H.msg = nil
@@ -274,6 +325,7 @@ end
 
 -- --------------------------------------------------------------- resolver
 function H.resolver()
+  if Res.modo then Res.tecla("r"); redraw(); return end
   local ok, S = pcall(require, "core.solver")
   if not ok or type(S) ~= "table" then
     D.aviso("Solver no disponible", "Resolver")
@@ -286,6 +338,17 @@ function H.resolver()
   end
   local ok2, msg = Res.resolver(S, m)
   if ok2 then aviso(msg or "Resuelto") else aviso(msg or "No se pudo resolver", true) end
+end
+
+-- Vuelve al modo modelado (y a la herramienta que habia)
+function H.salir_resultados()
+  if not Res.modo then return end
+  Res.limpiar()
+  redraw()
+end
+
+function H.leyenda()
+  Res.leyenda()
 end
 
 -- ------------------------------------------------------------- dialogos
@@ -723,6 +786,7 @@ local function clic(px, py)
     t.barra, t.a = e, a
   end
   H.accion(t, false)
+  if Res.modo then Res.clic(px, py) end
 end
 
 -- ------------------------------------------------------------------ arrastre
@@ -774,7 +838,11 @@ local function boton_en(x, y)
 end
 
 local function accion_boton(id)
-  if id == "resolver" then H.resolver()
+  if id == "r_volver" then H.salir_resultados()
+  elseif id == "r_mas" then if not Res.tecla("+") then H.zoom(1.4) end
+  elseif id == "r_menos" then if not Res.tecla("-") then H.zoom(1 / 1.4) end
+  elseif id:sub(1, 2) == "r_" then Res.set_vista(id:sub(3))
+  elseif id == "resolver" then H.resolver()
   elseif id == "undo" then H.deshacer()
   elseif id == "redo" then H.rehacer()
   elseif id == "fit" then H.encuadrar()
@@ -807,6 +875,7 @@ end
 
 function H.mouseMove(x, y)
   actualizar_hover(x, y)
+  if Res.modo and not drag and not ptr then Res.mouse(x, y) end
   if drag then
     drag_mover(x, y)
     return
@@ -928,6 +997,21 @@ end
 function H.charIn(c)
   H.msg = nil
   local k = c:lower()
+  if Res.modo then
+    -- teclas del modo resultados; s/a/c/b vuelven a modelar con esa herramienta
+    if k == "s" or k == "a" or k == "c" or k == "b" then
+      H.salir_resultados()
+    elseif Res.tecla(c) then
+      redraw()
+      return
+    elseif k == "f" then H.encuadrar(); return
+    elseif k == "z" then H.zoom(1.4); return
+    elseif k == "x" then H.zoom(1 / 1.4); return
+    elseif k == "p" then
+      H.props_globales()
+      return
+    end
+  end
   if k == "s" then H.set_tool("sel")
   elseif k == "n" then H.set_tool("nodo")
   elseif k == "b" then H.set_tool("barra")
@@ -943,7 +1027,8 @@ function H.charIn(c)
   elseif k == "k" then H.ciclar_snap()
   elseif k == "x" then H.dialogo_coordenadas()
   elseif k == "p" then H.props_globales()
-  elseif k == "h" or k == "?" then H.ayuda()
+  elseif k == "h" then H.ayuda()
+  elseif k == "l" or k == "?" then H.leyenda()
   elseif k == "m" then H.mover_seleccion()
   end
   redraw()
@@ -951,6 +1036,7 @@ end
 
 function H.arrow(k)
   H.msg = nil
+  if Res.modo and not drag and Res.arrow(k) then redraw(); return end
   local s = H.sel
   if H.tool == "sel" and s and s.t == "nodo" and ED.m.nodos[s.i] and not drag then
     local st = V.snap_valor()
@@ -986,6 +1072,11 @@ end
 function H.esc()
   H.msg = nil
   if drag then fin_drag(true); return end
+  if Res.modo then
+    if not Res.esc() then H.salir_resultados() end
+    redraw()
+    return
+  end
   if H.barra_a then
     H.barra_a = nil
     aviso("Cadena de barras terminada")
@@ -1002,6 +1093,7 @@ function H.del()
 end
 
 function H.tab()
+  if Res.modo then Res.siguiente(1); redraw(); return end
   -- Tab: siguiente herramienta
   local orden = { "sel", "nodo", "barra", "apoyo", "carga" }
   for i = 1, #orden do
@@ -1011,6 +1103,7 @@ end
 
 -- ----------------------------------------------------- archivo / ejemplos
 function H.nuevo()
+  if Res.modo then H.salir_resultados() end
   ED.reemplazar(ED.nuevo())
   H.sel, H.barra_a = nil, nil
   V.encuadrar(ED.m)
@@ -1024,7 +1117,7 @@ function H.ejemplo(nombre)
   ED.reemplazar(m)
   H.sel, H.barra_a = nil, nil
   V.encuadrar(ED.m)
-  H.set_tool("sel")
+  if not Res.modo then H.set_tool("sel") end
   aviso("Ejemplo: " .. nombre .. " (U deshace)")
 end
 

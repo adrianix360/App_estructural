@@ -594,7 +594,7 @@ local function barra_herramientas(gc, H)
   setc(gc, C.tb_borde); pen(gc, "thin"); gc:drawLine(0, bh - 1, WW - 1, bh - 1)
   for i = 1, #H.botones do
     local b = H.botones[i]
-    local activo = b.herr and H.tool == b.herr
+    local activo = (b.herr and H.tool == b.herr) or (b.vista and Res.modo == b.vista)
     local gris = (b.id == "undo" and not ED.puede_deshacer()) or (b.id == "redo" and not ED.puede_rehacer())
     if activo then
       setc(gc, C.tb_act); gc:fillRect(b.x, b.y, b.w, b.h)
@@ -603,7 +603,16 @@ local function barra_herramientas(gc, H)
       setc(gc, C.fondo); gc:fillRect(b.x, b.y, b.w, b.h)
       setc(gc, C.tb_borde); gc:drawRect(b.x, b.y, b.w, b.h)
     end
-    icono(gc, b.id, b.x + 10, b.y + b.h / 2, gris)
+    if b.txt then
+      local tc = C.info
+      if b.vista == "N" then tc = { 140, 50, 190 } elseif b.vista == "V" then tc = { 215, 30, 30 }
+      elseif b.vista == "M" then tc = { 20, 70, 225 } elseif b.vista == "def" then tc = C.verde
+      elseif b.vista == "reac" then tc = { 205, 0, 165 } elseif b.id == "r_volver" then tc = C.texto end
+      setc(gc, tc)
+      txt(gc, b.txt, b.x + b.w / 2, b.y + 4, 9, "c", (activo or #b.txt <= 2) and "b" or "r")
+    else
+      icono(gc, b.id, b.x + 10, b.y + b.h / 2, gris)
+    end
     if b.tecla then
       setc(gc, activo and C.tb_act_b or C.etiq)
       txt(gc, b.tecla, b.x + b.w - 3, b.y + b.h - 10, 7, "r", activo and "b" or "r")
@@ -618,7 +627,7 @@ local function barra_estado(gc, H)
   local msg = H.msg
   local der = H.texto_coord()
   fuente(gc, "r", 7)
-  local wd = (not msg and der) and gc:getStringWidth(der) or 0
+  local wd = (not msg and der and der ~= "") and gc:getStringWidth(der) or 0
   local izq, tam = nil, 9
   if msg then izq = msg.t; setc(gc, msg.err and C.err or C.info)
   else izq = H.texto_estado(); setc(gc, C.texto) end
@@ -627,6 +636,12 @@ local function barra_estado(gc, H)
   if gc:getStringWidth(izq) > maxw then
     tam = 7
     fuente(gc, "r", 7)
+    if gc:getStringWidth(izq) > maxw then
+      -- recorta con ".." para no pisar el texto de la derecha
+      local n = #izq
+      while n > 4 and gc:getStringWidth(izq:sub(1, n) .. "..") > maxw do n = n - 1 end
+      izq = izq:sub(1, n) .. ".."
+    end
   end
   gc:drawString(izq, 4, sy + (tam == 9 and 1 or 3), "top")
   if wd > 0 then
@@ -637,14 +652,20 @@ local function barra_estado(gc, H)
 end
 
 -- --------------------------------------------------------------------- todo
+-- primitivas que usa ui.resultados (evita duplicar recorte y fuentes)
+local PRIM = { setc = setc, pen = pen, ln = ln, txt = txt, r = r, disco = disco, anillo = anillo,
+               punta = punta, fuente = fuente, C = C }
+
 function P.pintar(gc, H)
   fcur_s, fcur_z = nil, nil
   setc(gc, C.fondo); gc:fillRect(0, 0, WW, HH)
-  rejilla(gc)
-  modelo(gc, H)
-  Res.pintar(gc, V, ED.m)
+  if not Res.pantalla_completa() then
+    rejilla(gc)
+    modelo(gc, H)
+  end
+  Res.pintar(gc, V, ED.m, PRIM)
   guia_cursor(gc, H)
-  if #ED.m.nodos == 0 then
+  if #ED.m.nodos == 0 and not Res.modo then
     local R = V.rect
     setc(gc, C.etiq)
     txt(gc, "Modelo vacio", R.x + R.w / 2, R.y + R.h / 2 - 24, 12, "c", "b")

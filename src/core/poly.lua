@@ -239,4 +239,59 @@ function M.tostring(p, var, dec)
   return out
 end
 
+-- Coeficiente |a| con 'sig' cifras significativas, sin ceros finales. Fuera de [1e-3, 1e6)
+-- usa notacion cientifica: "1.234e-5" (cas=false) o "1.234*10^(-5)" (cas=true, para el CAS,
+-- donde "e" se confundiria con el numero de Euler).
+local function fmt_sig(a, sig, cas)
+  local e10 = math.floor(math.log10(a) + 1e-12)
+  if e10 >= -3 and e10 < 6 then
+    local d = sig - 1 - e10
+    if d < 0 then d = 0 end
+    return fmt(a, d)
+  end
+  local m = a / 10 ^ e10
+  local ms = fmt(m, sig - 1)
+  if ms == "10" then ms = "1"; e10 = e10 + 1 end
+  if cas then return ms .. "*10^(" .. e10 .. ")" end
+  return ms .. "e" .. e10
+end
+
+-- Texto con 'sig' cifras significativas (4 por omision). 'xref' es la escala de x (p. ej. la
+-- longitud de la barra): los terminos que valen menos de 1e-9 del mayor (|c|*xref^k) se omiten.
+-- cas = true produce una expresion apta para math.evalStr.
+function M.tostring_sig(p, var, sig, cas, xref)
+  var = var or "x"
+  sig = sig or 4
+  xref = xref or 1
+  local cmax = 0
+  for i = 1, #p do
+    local v = abs(p[i]) * xref ^ (i - 1)
+    if v > cmax then cmax = v end
+  end
+  local out = ""
+  for i = #p, 1, -1 do
+    local c = p[i]
+    if c ~= 0 and abs(c) * xref ^ (i - 1) > 1e-9 * cmax then
+      local r = fmt_sig(abs(c), sig, cas)
+      local k = i - 1
+      local t
+      if k == 0 then
+        t = r
+      else
+        if r == "1" then t = var else t = r .. "*" .. var end
+        if k > 1 then t = t .. "^" .. k end
+      end
+      if c < 0 then
+        out = out .. "-" .. t
+      elseif out == "" then
+        out = t
+      else
+        out = out .. "+" .. t
+      end
+    end
+  end
+  if out == "" then out = "0" end
+  return out
+end
+
 return M

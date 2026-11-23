@@ -354,6 +354,37 @@ function mock.restore(t)
   on.restore(deep_copy(t))
 end
 
+-- ------------------------------------------------------------------- CAS
+-- math.evalStr simulado (la calculadora real lo trae; el mock no lo define por omision).
+--   mock.set_cas(nil | "off")  lo quita
+--   mock.set_cas("eco")        devuelve la misma cadena que recibe
+--   mock.set_cas("nil")        devuelve nil (el CAS "no entiende")
+--   mock.set_cas("error")      lanza un error
+--   mock.set_cas("calc")       "expand(E)" -> E ; "(E)|x=v" -> valor numerico (evalua con Lua)
+-- Comparte la tabla math con la app (el mock no la copia), asi que hay que quitarlo al terminar.
+mock.cas_llamadas = 0
+function mock.set_cas(modo)
+  mock.cas_llamadas = 0
+  if not modo or modo == "off" then math.evalStr = nil; return end
+  math.evalStr = function(expr)
+    mock.cas_llamadas = mock.cas_llamadas + 1
+    if modo == "eco" then return expr end
+    if modo == "nil" then return nil end
+    if modo == "error" then error("CAS simulado: fallo") end
+    local e = expr:match("^expand%((.*)%)$")
+    if e then return e end
+    local body, v = expr:match("^%((.*)%)|x=(.+)$")
+    if body then
+      local f = loadstring("return " .. body:gsub("x", "(" .. v .. ")"))
+      if not f then return nil end
+      setfenv(f, {})
+      local ok, r = pcall(f)
+      if ok and type(r) == "number" then return string.format("%.12g", r) end
+    end
+    return nil
+  end
+end
+
 -- ----------------------------------------------------------- volcado JSON
 local function jstr(s)
   local r = s:gsub('[%c"\\]', function(c)

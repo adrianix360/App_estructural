@@ -112,6 +112,14 @@ Restricciones: sin variables globales; módulos devuelven tabla; nada de `io`/`o
 - `ui.cas`: ecuaciones por tramo vía `math.evalStr` con respaldo `core.poly`.
 - Recalcular automáticamente tras cada cambio (estructuras ≤ 20 nodos); cachear muestras de diagramas por (resultado, cámara) para no asignar memoria en `on.paint`.
 
+### 6.1 Modo resultados (`ui.resultados`, `ui.cas`)
+
+- `r` / botón Resolver entra en modo resultados (la herramienta pasa a Seleccionar y se restaura al salir). Cada cambio del modelo (`ED.on_cambio` → `R.invalidar`) re-resuelve al instante si hay ≤ 20 nodos; si no, avisa y `r` fuerza el cálculo. La clasificación (`S.clasificar`) se muestra siempre a la derecha de la barra de estado; los errores del solver se traducen a mensajes accionables y se muestran en un recuadro.
+- Vistas (barra de herramientas: Reac, N, V, M, Def, Tabla, Ecs, +, −, Modelar): teclas `r n v m d t e`, TAB cicla, `+`/`-` escala del diagrama o factor de la deformada, `0` deformada real, `?`/`l` leyenda, `f` encuadrar, `z`/`x` zoom, ESC quita el cursor y luego vuelve a modelar (`s a c b` vuelven a modelar con esa herramienta). Flechas: ←/→ mueven el cursor por la barra, ↑/↓ cambian de barra; en Tabla/Ecs desplazan (←/→ cambian de barra en Ecs).
+- Valor al apuntar: `on.mouseMove` sin clic (o clic/flechas) sobre barra (≤ 8 px) o nodo (≤ 7 px) → recuadro y barra de estado con N, V, M, δ en ese x.
+- Cache por resultado en coordenadas de barra (x local, valor): la cámara solo interviene al pintar, sin crear tablas (≈ 0.4 KB de basura por `on.paint`).
+- `ui.cas.ecuacion`: `math.evalStr("expand(...)")` dentro de `pcall`; solo se acepta si coincide numéricamente en 2 puntos con `core.poly`; se indica el motor ("CAS" o "propio"). Texto de los polinomios: `poly.tostring_sig` (4 cifras significativas).
+
 ## 7. Verificación
 
 `tests/test_solver.lua` (casos analíticos de PROMPT §7 con error relativo < 1e-6) y

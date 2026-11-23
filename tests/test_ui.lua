@@ -418,7 +418,9 @@ key("r")
 local hay_solver = pcall(env.require, "core.solver")
 if hay_solver then
   check(D.activo() == nil, "con solver no hay aviso modal")
-  print("   (core.solver presente: ver mensaje de estado)")
+  eq(env.require("ui.resultados").modo, "reac", "con solver entra en modo resultados")
+  key("escape")
+  eq(env.require("ui.resultados").modo, nil, "ESC vuelve a modelar")
 else
   check(D.activo() ~= nil and shown("Solver no disponible"), "sin solver: 'Solver no disponible'")
   key("enter")
@@ -482,10 +484,11 @@ H.encuadrar()
 print("-- memoria de paint")
 H.ejemplo("Cercha"); H.encuadrar()
 local gcc = env.collectgarbage
+local noop, w30, h12 = function() end, function() return 30 end, function() return 12 end
 local nulo = setmetatable({}, { __index = function(_, k)
-  if k == "getStringWidth" then return function() return 30 end end
-  if k == "getStringHeight" then return function() return 12 end end
-  return function() end
+  if k == "getStringWidth" then return w30 end
+  if k == "getStringHeight" then return h12 end
+  return noop   -- funciones compartidas: un closure por llamada falsearia la medicion
 end })
 env.on.paint(nulo)
 gcc("collect")
@@ -494,7 +497,7 @@ for i = 1, 100 do env.on.paint(nulo) end
 local m1 = gcc("count")
 local por_paint = (m1 - m0) / 100
 print(string.format("   basura por on.paint (gc nulo, cercha): %.2f KB", por_paint))
-check(por_paint < 8, "on.paint genera poca basura: " .. por_paint .. " KB")
+check(por_paint < 3, "on.paint genera poca basura: " .. por_paint .. " KB")
 
 -- PNG adicionales: estados representativos
 nuevo()
