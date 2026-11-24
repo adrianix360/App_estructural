@@ -67,6 +67,23 @@ modelo = {
 ```
 - `dir`: `"GY"` (global Y), `"GX"` (global X), `"L"` (perpendicular local, +y local), `"LX"` (axial local). Intensidad `w` por **unidad de longitud de barra**.
 - Falta un campo ⇒ valor por omisión (`apoyo.k* = 0`, `d* = 0`, `cargas = {}`).
+- **Carga térmica** (v1.0), en `barra.cargas`: `{ t = "T", du = 20, dg = 10, alfa = 1.2e-5, h = 0.3 }`
+  - `du` (°C): incremento uniforme de temperatura en el eje (positivo = calentamiento ⇒ alarga la barra).
+  - `dg` (°C): diferencia `T(cara −y local) − T(cara +y local)`; en viga horizontal i→j, `dg > 0` = cara inferior más caliente ⇒ la barra se curva hacia arriba (centro sube si está simplemente apoyada).
+  - `alfa` (1/°C, por omisión 1.2e-5), `h` (m, canto de la sección; obligatorio si `dg ≠ 0`).
+  - Deformaciones impuestas: `ε_T = alfa·du`, curvatura `κ_T = −alfa·dg/h` (con `v'' = M/EI + κ_T`); `u' = N/EA + ε_T`. Comprobaciones: empotrada-empotrada con `du` ⇒ `N = −EA·alfa·du`; con `dg` ⇒ `M` constante, `|M| = EI·alfa·dg/h`, y `v ≡ 0`; simplemente apoyada con `dg` ⇒ flecha central `alfa·dg·L²/(8h)` hacia arriba, sin esfuerzos; libre axialmente con `du` ⇒ alargamiento `alfa·du·L` sin esfuerzos.
+
+## 4.1 Unidades de presentación (v1.0)
+
+Internas siempre kN, m, rad. La UI ofrece sistemas (menú Ajustes → Unidades), guardados en `cfg.unidades`:
+
+| Sistema | Fuerza | Longitud | Distribuida | Momento | E | A | I | Desplazamiento |
+|---|---|---|---|---|---|---|---|---|
+| `kN-m` (omisión) | kN | m | kN/m | kN·m | GPa | cm² | cm⁴ | mm |
+| `N-m` (SI) | N | m | N/m | N·m | Pa | m² | m⁴ | m |
+| `tf-m` | tf (9.80665 kN) | m | tf/m | tf·m | kgf/cm² | cm² | cm⁴ | mm |
+
+Conversión centralizada en `src/ui/unidades.lua`: `U.a_interna(cant, valor)`, `U.de_interna(cant, valor)`, `U.etiqueta(cant)`, con `cant` ∈ fuerza, long, dist, momento, E, A, I, desp, giro, temp.
 
 ## 5. API del núcleo (`src/core/`)
 
