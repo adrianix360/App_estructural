@@ -1,0 +1,99 @@
+{
+ "ver": 1,
+ "nombre": "termica_empotrada_apoyada",
+ "desc": "Viga empotrada (1) - rodillo (2) L=5, dg=20 (h=0.3): R=3EI*alfa*dg/(2hL), M(0)=R*L",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 5.0,
+   "y": 0,
+   "apoyo": {
+    "ux": false,
+    "uy": true,
+    "rz": false
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "T",
+     "du": 0.0,
+     "alfa": 1.2e-05,
+     "dg": 20.0,
+     "h": 0.3
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "reac",
+   "nodo": 2,
+   "c": "ry",
+   "v": 4.8,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "ry",
+   "v": -4.8,
+   "tol": 1e-06
+  },
+  {
+   "t": "reac",
+   "nodo": 1,
+   "c": "mz",
+   "v": -24.0,
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 0.0,
+   "c": "M",
+   "v": 24.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "esf",
+   "barra": 1,
+   "x": 2.5,
+   "c": "M",
+   "v": 12.0,
+   "lado": "+",
+   "tol": 1e-06
+  },
+  {
+   "t": "d",
+   "nodo": 2,
+   "c": "rz",
+   "v": -0.0010000000000000002,
+   "tol": 1e-06
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 1
+  }
+ ]
+}

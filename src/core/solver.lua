@@ -108,6 +108,16 @@ local function preparar(modelo)
             or q.a < -tolx or q.b > L + tolx or q.b < q.a then
             return nil, mkerr("DATO", "Carga distribuida no valida en la barra " .. e, nil, e)
           end
+        elseif t == "T" then
+          local du, dg = q.du or 0, q.dg or 0
+          if not num(du) or not num(dg) or (q.alfa ~= nil and not num(q.alfa))
+            or (q.h ~= nil and not num(q.h)) then
+            return nil, mkerr("DATO", "Carga termica no valida en la barra " .. e, nil, e)
+          end
+          if dg ~= 0 and not (q.h and q.h > 0) then
+            return nil, mkerr("DATO", "La carga termica de la barra " .. e
+              .. " tiene gradiente y necesita el canto h > 0", nil, e)
+          end
         else
           return nil, mkerr("DATO", "Tipo de carga desconocido en la barra " .. e, nil, e)
         end

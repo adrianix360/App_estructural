@@ -41,6 +41,14 @@ local function tramos_barra(b, rb)
   local EI, EA = Em * Im, Em * Am
   local cargas = b.cargas or {}
   local tol = 1e-9 * L
+  -- deformaciones termicas impuestas (suman a u' y a v'')
+  local eps_T, kap_T = 0, 0
+  for k = 1, #cargas do
+    if cargas[k].t == "T" then
+      local e1, k1 = Elem.termica(cargas[k])
+      eps_T, kap_T = eps_T + e1, kap_T + k1
+    end
+  end
 
   -- quiebres
   local bp, n = { 0, L }, 2
@@ -63,7 +71,7 @@ local function tramos_barra(b, rb)
 
   local tr = {}
   local th0, v0, u0 = dl[3], dl[2], dl[1]
-  local vsc, thsc, usc = 0, 0, 0 -- magnitudes tipicas de los campos (para el error relativo)
+  local vsc, thsc, usc = abs(kap_T) * L * L, abs(kap_T) * L, abs(eps_T) * L -- magnitudes tipicas de los campos (para el error relativo)
   for t = 1, #xs - 1 do
     local x0, x1 = xs[t], xs[t + 1]
     local n0, n1, n2 = -fl[1], 0, 0
@@ -128,8 +136,16 @@ local function tramos_barra(b, rb)
     local Vp = P.trim({ v0c, v1c, v2c })
     local Mp = P.trim({ m0, m1, m2, m3 })
     local th = integ_cont(Mp, 1 / EI, x0, th0)
+    if kap_T ~= 0 then
+      th = P.add(th, { 0, kap_T })
+      th[1] = th0 - P.eval(th, x0) + th[1]
+    end
     local y = integ_cont(th, 1, x0, v0)
     local u = integ_cont(Np, 1 / EA, x0, u0)
+    if eps_T ~= 0 then
+      u = P.add(u, { 0, eps_T })
+      u[1] = u0 - P.eval(u, x0) + u[1]
+    end
     tr[t] = { x0 = x0, x1 = x1, N = Np, V = Vp, M = Mp, th = th, y = y, u = u }
     th0 = P.eval(th, x1)
     v0 = P.eval(y, x1)

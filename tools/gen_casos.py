@@ -215,4 +215,35 @@ for (r, wv) in ((4, -20.0), (7, -12.0)):
 guardar("marco_2pisos", "Marco de 2 pisos y 2 vanos, 9 nodos 10 barras, w=-20/-12 en vigas, fx=25 y 15 laterales",
         nn, bb,
         [sr("rx", -40.0, 1e-9), sr("ry", 2 * Lv * (20 + 12), 1e-9), cl("hiperestatica", 11)])
+
+# 15-17 carga termica (docs/arquitectura.md Sec. 4): eps = alfa*du, kappa = -alfa*dg/h
+def term(du=0.0, dg=0.0, alfa=1.2e-5, h=0.3):
+    q = {"t": "T", "du": du, "alfa": alfa}
+    if dg:
+        q["dg"] = dg
+        q["h"] = h
+    return q
+
+
+al, hh, L, du, dg = 1.2e-5, 0.3, 5.0, 30.0, 20.0
+EA = E * A
+guardar("termica_empotrada", "Barra empotrada-empotrada L=5, du=30 y dg=20 (h=0.3): N=-EA*alfa*du, M=EI*alfa*dg/h constante, v=0",
+        [nodo(0, 0, EMP), nodo(L, 0, EMP)],
+        [barra(1, 2, cargas=[term(du, dg, al, hh)])],
+        [es(1, L / 2, "N", -EA * al * du), es(1, L / 2, "M", EI * al * dg / hh), es(1, L / 2, "v", 0.0, "+", 1e-9),
+         rc(1, "rx", EA * al * du), rc(1, "mz", -EI * al * dg / hh), rc(2, "mz", EI * al * dg / hh),
+         cl("hiperestatica", 3)])
+
+R = 3 * EI * al * dg / (2 * hh * L)
+guardar("termica_empotrada_apoyada", "Viga empotrada (1) - rodillo (2) L=5, dg=20 (h=0.3): R=3EI*alfa*dg/(2hL), M(0)=R*L",
+        [nodo(0, 0, EMP), nodo(L, 0, ROD)],
+        [barra(1, 2, cargas=[term(0.0, dg, al, hh)])],
+        [rc(2, "ry", R), rc(1, "ry", -R), rc(1, "mz", -R * L), es(1, 0.0, "M", R * L), es(1, L / 2, "M", R * L / 2),
+         dd(2, "rz", -al * dg * L / (4 * hh)), cl("hiperestatica", 1)])
+
+hp, Lp = 4.0, 6.0
+guardar("portal_termico", "Portal empotrado: viga con du=40 (alfa 1.2e-5), columna derecha con dg=15 (h=0.4), rotula en cabeza de la columna izquierda",
+        [nodo(0, 0, EMP), nodo(0, hp), nodo(Lp, hp), nodo(Lp, 0, EMP)],
+        [barra(1, 2, rot_j=True), barra(2, 3, cargas=[term(40.0)]), barra(4, 3, cargas=[term(0.0, 15.0, al, 0.4)])],
+        [sr("rx", 0.0, 1e-9), sr("ry", 0.0, 1e-9), cl("hiperestatica", 2)])
 print("ok")

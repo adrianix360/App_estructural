@@ -92,6 +92,13 @@ def cargas_locales(b, c, s):
             x1, y1 = comp_local(ld.get("dir", "GY"), ld["w1"], c, s)
             x2, y2 = comp_local(ld.get("dir", "GY"), ld["w2"], c, s)
             out.append(("w", ld["a"], ld["b"], (x1, x2), (y1, y2)))
+        elif t == "T":
+            # deformaciones iniciales: eps0 = alfa*du (axial), kappa0 = -alfa*dg/h (curvatura)
+            alfa = ld.get("alfa", 1.2e-5)
+            dg = ld.get("dg", 0.0) or 0.0
+            if dg != 0 and not ld.get("h"):
+                raise ErrorModelo("carga termica con dg y sin canto h")
+            out.append(("T", alfa * (ld.get("du", 0.0) or 0.0), -alfa * dg / ld["h"] if dg != 0 else 0.0))
         else:
             raise ErrorModelo("tipo de carga desconocido: %r" % (t,))
     return out
@@ -115,7 +122,7 @@ def hermite(L):
     return [n1, n2, n3, n4], [1 - xi, xi]
 
 
-def fef_local(cl, L):
+def fef_local(cl, L, EA=0.0, EI=0.0):
     """Fuerzas de empotramiento (nodos sobre barra, extremos fijos) = - cargas nodales equivalentes."""
     (n1, n2, n3, n4), (a1, a2) = hermite(L)
     feq = np.zeros(6)
@@ -131,6 +138,16 @@ def fef_local(cl, L):
         elif ld[0] == "M":
             _, a, m = ld
             feq += m * np.array([0, n1.deriv()(a), n2.deriv()(a), 0, n3.deriv()(a), n4.deriv()(a)])
+        elif ld[0] == "T":
+            # Cargas nodales equivalentes de deformaciones iniciales: integral de B^T * D * e0,
+            # con B = derivadas de las funciones de forma (axial: N', flexion: N'').
+            _, eps0, kap0 = ld
+            feq += np.array([integ(a1.deriv(), 0, L) * EA * eps0,
+                             integ(n1.deriv(2), 0, L) * EI * kap0,
+                             integ(n2.deriv(2), 0, L) * EI * kap0,
+                             integ(a2.deriv(), 0, L) * EA * eps0,
+                             integ(n3.deriv(2), 0, L) * EI * kap0,
+                             integ(n4.deriv(2), 0, L) * EI * kap0])
         else:
             _, a, b, (qx1, qx2), (qy1, qy2) = ld
             qx, qy = lin(a, b, qx1, qx2), lin(a, b, qy1, qy2)
@@ -182,7 +199,7 @@ def resolver(m):
         T[3:, 3:] = R
         kl = klocal(b["E"], b["A"], b["I"], L)
         cl = cargas_locales(b, c, s)
-        fe = fef_local(cl, L)
+        fe = fef_local(cl, L, b["E"] * b["A"], b["E"] * b["I"])
         K[np.ix_(dofs, dofs)] += T.T @ kl @ T
         FE[dofs] += T.T @ fe
         info.append(dict(L=L, c=c, s=s, T=T, kl=kl, fe=fe, dofs=dofs, cl=cl))
@@ -275,6 +292,8 @@ def esfuerzos_barra(b, inf):
     pts = {0.0, L}
     saltos = []
     for ld in cl:
+        if ld[0] == "T":
+            continue
         if ld[0] in ("P", "M"):
             pts.add(ld[1])
             if 1e-12 < ld[1] < L - 1e-12:
@@ -297,6 +316,8 @@ def esfuerzos_barra(b, inf):
         V = Pl([Fyi])
         M = Pl([-Mi]) + Fyi * x
         for ld in cl:
+            if ld[0] == "T":
+                continue
             if ld[0] == "P":
                 _, a, px, py = ld
                 if a < xm:
@@ -322,7 +343,8 @@ def esfuerzos_barra(b, inf):
                     N = N - (Gx(bq) - Gx(a))
                     V = V + (Gy(bq) - Gy(a))
                     M = M + x * (Gy(bq) - Gy(a)) - (Hy(bq) - Hy(a))
-        P1 = (M / EI).integ()
+        kap0 = sum(ld[2] for ld in cl if ld[0] == "T")
+        P1 = (M / EI + kap0).integ()
         th = P1 - P1(x0) + th0
         P2 = th.integ()
         v = P2 - P2(x0) + v0
@@ -417,6 +439,8 @@ def resultante_cargas(m, info):
         ni = m["nodos"][b["ni"] - 1]
         c, s = inf["c"], inf["s"]
         for ld in inf["cl"]:
+            if ld[0] == "T":
+                continue
             if ld[0] == "P":
                 _, a, px, py = ld
                 Fx, Fy = px * c - py * s, px * s + py * c

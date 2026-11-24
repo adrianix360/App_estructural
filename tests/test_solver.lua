@@ -576,6 +576,152 @@ do
   chk("momento en la rotula = 0", Mr, 0, 1e-8, 20)
 end
 
+----------------------------------------------------------------------------------------------
+grupo("Carga termica (docs/arquitectura.md Sec. 4)")
+do
+  -- Signos: eps = alfa*du; kappa = -alfa*dg/h (v'' = M/EI + kappa); dg>0 = cara inferior caliente.
+  local al, h, L = 1.2e-5, 0.3, 5
+  local du, dg = 30, 20
+  local EA = E0 * A0
+  -- empotrada-empotrada, du: N = -EA*alfa*du (compresion), sin giros ni flechas
+  local m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0, EMP)
+  barra(m, 1, 2, { cargas = { { t = "T", du = du, alfa = al } } })
+  local res = resolver(m, "termica EE du")
+  chk("EE du: N = -EA*alfa*du", (E.eval(res, 1, L / 2)), -EA * al * du)
+  chk("EE du: Rx1 = +EA*alfa*du", res.reac[1].rx, EA * al * du)
+  chk("EE du: Rx2 = -EA*alfa*du", res.reac[2].rx, -EA * al * du)
+  local _, _, Mx, _, vv = E.eval(res, 1, L / 2)
+  chk("EE du: M = 0", Mx, 0, 1e-9, EA * al * du * 0.01)
+  chk("EE du: v = 0", vv, 0, 1e-9, 1e-3)
+
+  -- empotrada-empotrada, dg: M constante = +EI*alfa*dg/h (sonrisa), v = 0, reacciones en momento
+  m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0, EMP)
+  barra(m, 1, 2, { cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica EE dg")
+  local Mt = EI * al * dg / h
+  for _, x in ipairs({ 0, 1.3, L / 2, L - 1e-9 }) do
+    local _, V, Mm, _, v = E.eval(res, 1, x)
+    chk(string.format("EE dg: M(%.2f) = +EI*alfa*dg/h", x), Mm, Mt)
+    chk(string.format("EE dg: v(%.2f) = 0", x), v, 0, 1e-9, 1e-3)
+    if x == 1.3 then chk("EE dg: V = 0", V, 0, 1e-9, Mt) end
+  end
+  chk("EE dg: reaccion mz1 = -M (horaria)", res.reac[1].mz, -Mt)
+  chk("EE dg: reaccion mz2 = +M (antihoraria)", res.reac[2].mz, Mt)
+  chk("EE dg: ry1 = 0", res.reac[1].ry, 0, 1e-9, Mt)
+
+  -- simplemente apoyada, dg: sin esfuerzos, flecha central alfa*dg*L^2/(8h) HACIA ARRIBA
+  m = nuevo()
+  nodo(m, 0, 0, PIN); nodo(m, L, 0, ROD)
+  barra(m, 1, 2, { cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica SA dg")
+  local _, _, Mc, thc, vc = E.eval(res, 1, L / 2)
+  chk("SA dg: flecha central = +alfa*dg*L^2/(8h) (arriba)", vc, al * dg * L * L / (8 * h))
+  chk("SA dg: M = 0", Mc, 0, 1e-9, Mt)
+  chk("SA dg: giro en apoyo i = +alfa*dg*L/(2h) (antihorario, v'(0) = -kappa*L/2)", res.d[1].rz, al * dg * L / (2 * h))
+  chk("SA dg: giro en apoyo j = -alfa*dg*L/(2h)", res.d[2].rz, -al * dg * L / (2 * h))
+  chk("SA dg: theta(L/2) = 0", thc, 0, 1e-9, al * dg * L / (2 * h))
+  chk("SA dg: reaccion ry = 0", res.reac[1].ry, 0, 1e-9, Mt)
+
+  -- libre axialmente (apoyo + rodillo horizontal), du: alargamiento alfa*du*L, sin esfuerzos
+  m = nuevo()
+  nodo(m, 0, 0, PIN); nodo(m, L, 0, ROD)
+  barra(m, 1, 2, { cargas = { { t = "T", du = du, alfa = al } } })
+  res = resolver(m, "termica libre du")
+  chk("libre du: ux(j) = alfa*du*L", res.d[2].ux, al * du * L)
+  chk("libre du: N = 0", (E.eval(res, 1, L / 2)), 0, 1e-9, EA * al * du)
+  chk("libre du: u(L) = alfa*du*L", select(6, E.eval(res, 1, L - 1e-12)), al * du * L)
+  chk("libre du: Rx = 0", res.reac[1].rx, 0, 1e-9, EA * al * du)
+
+  -- alfa por omision (1.2e-5)
+  m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0, EMP)
+  barra(m, 1, 2, { cargas = { { t = "T", du = 10 } } })
+  res = resolver(m, "termica alfa omision")
+  chk("alfa por omision 1.2e-5: N = -EA*1.2e-5*du", (E.eval(res, 1, 1)), -EA * 1.2e-5 * 10)
+
+  -- hiperestatica: empotrada (i) - rodillo (j), dg. Se libera el rodillo: voladizo con curvatura
+  -- kappa = -alfa*dg/h => v(L) = kappa*L^2/2 (hacia abajo). La reaccion R (arriba) lo devuelve:
+  -- R*L^3/(3EI) = alfa*dg*L^2/(2h)  =>  R = 3*EI*alfa*dg/(2*h*L). M(x) = R*(L-x), M(0) = 3EI*alfa*dg/(2h).
+  -- Giro en j: R*L^2/(2EI) + kappa*L = 3*alfa*dg*L/(4h) - alfa*dg*L/h = -alfa*dg*L/(4h).
+  m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0, ROD)
+  barra(m, 1, 2, { cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica empotrada-apoyada dg")
+  local R = 3 * EI * al * dg / (2 * h * L)
+  chk("EA dg: ry(j) = +3EI*alfa*dg/(2hL) (arriba)", res.reac[2].ry, R)
+  chk("EA dg: ry(i) = -R", res.reac[1].ry, -R)
+  chk("EA dg: mz(i) = -R*L (horaria)", res.reac[1].mz, -R * L)
+  chk("EA dg: M(0) = +R*L", (select(3, E.eval(res, 1, 0))), R * L)
+  chk("EA dg: M(L/2) = R*L/2", (select(3, E.eval(res, 1, L / 2))), R * L / 2)
+  chk("EA dg: M(L) = 0", (select(3, E.eval(res, 1, L - 1e-12))), 0, 1e-8, R * L)
+  chk("EA dg: giro en j = -alfa*dg*L/(4h)", res.d[2].rz, -al * dg * L / (4 * h))
+  chk("EA dg: v(L) = 0", (select(5, E.eval(res, 1, L - 1e-12))), 0, 1e-9, 1e-3)
+  cierto("EA dg: hiperestatica de grado 1", S.clasificar(m).grado == 1)
+
+  -- rotula en j con dg (condensacion): voladizo con curvatura libre, sin momentos;
+  -- punta cae |kappa|*L^2/2 y el giro de la rotula/punta es kappa*L
+  m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0)
+  barra(m, 1, 2, { rot_j = true, cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica rotula dg")
+  chk("rotula dg: M(x) = 0", (select(3, E.eval(res, 1, L / 2))), 0, 1e-9, Mt)
+  chk("rotula dg: flecha punta = -alfa*dg*L^2/(2h)", res.d[2].uy, -al * dg * L * L / (2 * h))
+  chk("rotula dg: reaccion mz = 0", res.reac[1].mz, 0, 1e-9, Mt)
+  -- rotula en i, empotrada en j: espejo
+  m = nuevo()
+  nodo(m, 0, 0); nodo(m, L, 0, EMP)
+  barra(m, 1, 2, { rot_i = true, cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica rotula i dg")
+  chk("rotula i dg: flecha punta i = -alfa*dg*L^2/(2h)", res.d[1].uy, -al * dg * L * L / (2 * h))
+  chk("rotula i dg: M = 0", (select(3, E.eval(res, 1, L / 2))), 0, 1e-9, Mt)
+  -- biarticulada con apoyos: flecha central libre
+  m = nuevo()
+  nodo(m, 0, 0, PIN); nodo(m, L, 0, ROD)
+  barra(m, 1, 2, { rot_i = true, rot_j = true, cargas = { { t = "T", dg = dg, alfa = al, h = h } } })
+  res = resolver(m, "termica biarticulada dg")
+  chk("biarticulada dg: flecha central", (select(5, E.eval(res, 1, L / 2))), al * dg * L * L / (8 * h))
+
+  -- validacion: dg sin canto h
+  m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, L, 0, EMP)
+  barra(m, 1, 2, { cargas = { { t = "T", dg = 10 } } })
+  local r2, er = S.resolver(m)
+  cierto("T con dg y sin h: error DATO en espanol", r2 == nil and er and er.cod == "DATO" and er.barra == 1
+    and er.msg:find("canto") ~= nil, er and er.msg)
+  m.barras[1].cargas[1].h = 0
+  r2, er = S.resolver(m)
+  cierto("T con h = 0: error DATO", r2 == nil and er and er.cod == "DATO")
+  m.barras[1].cargas[1] = { t = "T", du = 10 } -- du solo no necesita h
+  r2, er = S.resolver(m)
+  cierto("T solo con du: valida sin h", r2 ~= nil)
+  m.barras[1].cargas[1] = { t = "T", du = "x", h = 0.3 }
+  r2, er = S.resolver(m)
+  cierto("T con du no numerico: error DATO", r2 == nil and er and er.cod == "DATO")
+end
+
+----------------------------------------------------------------------------------------------
+grupo("Portal con calentamiento uniforme de la viga")
+do
+  -- Viga calentada du; columnas empotradas. Cargas autoequilibradas => reacciones suman 0.
+  local h, L, du = 4, 6, 40
+  local m = nuevo()
+  nodo(m, 0, 0, EMP); nodo(m, 0, h); nodo(m, L, h); nodo(m, L, 0, EMP)
+  barra(m, 1, 2); barra(m, 2, 3, { cargas = { { t = "T", du = du, alfa = 1.2e-5 } } }); barra(m, 4, 3)
+  local res = resolver(m, "portal termico")
+  chk("portal T: suma Rx = 0", res.reac[1].rx + res.reac[4].rx, 0, 1e-9, 1)
+  chk("portal T: suma Ry = 0", res.reac[1].ry + res.reac[4].ry, 0, 1e-9, 1)
+  chk("portal T: Rx simetricas (opuestas)", res.reac[1].rx, -res.reac[4].rx)
+  cierto("portal T: viga en compresion", (E.eval(res, 2, L / 2)) < 0)
+  cierto("portal T: |N| < EA*alfa*du (columnas flexibles)",
+    abs((E.eval(res, 2, L / 2))) < E0 * A0 * 1.2e-5 * du)
+  -- columnas muy rigidas a flexion => N -> -EA*alfa*du
+  m.barras[1].I = 1e3; m.barras[3].I = 1e3
+  res = resolver(m, "portal termico columnas rigidas")
+  chk("portal T con columnas rigidas: N = -EA*alfa*du", (E.eval(res, 2, L / 2)), -E0 * A0 * 1.2e-5 * du, 1e-4)
+end
+
 print(string.format("\n== Resumen: %d comprobaciones, %d fallo(s). Peor error relativo en chk: %.2e",
   total, fallos, peor))
 if fallos > 0 then os.exit(1) end

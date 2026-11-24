@@ -1,0 +1,101 @@
+{
+ "ver": 1,
+ "nombre": "portal_termico",
+ "desc": "Portal empotrado: viga con du=40 (alfa 1.2e-5), columna derecha con dg=15 (h=0.4), rotula en cabeza de la columna izquierda",
+ "nodos": [
+  {
+   "x": 0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  },
+  {
+   "x": 0,
+   "y": 4.0
+  },
+  {
+   "x": 6.0,
+   "y": 4.0
+  },
+  {
+   "x": 6.0,
+   "y": 0,
+   "apoyo": {
+    "ux": true,
+    "uy": true,
+    "rz": true
+   }
+  }
+ ],
+ "barras": [
+  {
+   "ni": 1,
+   "nj": 2,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": true,
+   "cargas": []
+  },
+  {
+   "ni": 2,
+   "nj": 3,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "T",
+     "du": 40.0,
+     "alfa": 1.2e-05
+    }
+   ]
+  },
+  {
+   "ni": 4,
+   "nj": 3,
+   "tipo": "portico",
+   "E": 200000000.0,
+   "A": 0.01,
+   "I": 0.0001,
+   "rot_i": false,
+   "rot_j": false,
+   "cargas": [
+    {
+     "t": "T",
+     "du": 0.0,
+     "alfa": 1.2e-05,
+     "dg": 15.0,
+     "h": 0.4
+    }
+   ]
+  }
+ ],
+ "esperado": [
+  {
+   "t": "sumaR",
+   "c": "rx",
+   "v": 0.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "sumaR",
+   "c": "ry",
+   "v": 0.0,
+   "tol": 1e-09
+  },
+  {
+   "t": "clasif",
+   "tipo": "hiperestatica",
+   "grado": 2
+  }
+ ]
+}

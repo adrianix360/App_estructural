@@ -55,6 +55,16 @@ local function acotar(a, L)
   return a
 end
 
+-- Deformaciones impuestas de una carga termica {t="T"}: eps = alfa*du (axial) y
+-- kappa = -alfa*dg/h (curvatura, con v'' = M/EI + kappa). Si dg = 0 no hace falta h.
+function M.termica(q)
+  local alfa = q.alfa or 1.2e-5
+  local dg = q.dg or 0
+  local kap = 0
+  if dg ~= 0 then kap = -alfa * dg / q.h end
+  return alfa * (q.du or 0), kap
+end
+
 -- Vector de empotramiento perfecto local f0 (6) por las cargas de la barra:
 -- puntual P, momento M, distribuida lineal w (a..b), en dir GY/GX/L/LX.
 function M.empotramiento(b, L, c, s)
@@ -77,6 +87,15 @@ function M.empotramiento(b, L, c, s)
       f[3] = f[3] - py * L * (xi - 2 * x2 + x3)
       f[5] = f[5] - py * (3 * x2 - 2 * x3)
       f[6] = f[6] - py * L * (-x2 + x3)
+    elseif t == "T" then
+      -- Extremos empotrados: f0 = -EA*eps (axial) y -EI*kappa (giros), con signos de las
+      -- fuerzas que los nodos ejercen sobre la barra: du>0 -> compresion (Fxi>0, Fxj<0).
+      local E, A, I = M.props(b, L)
+      local eps, kap = M.termica(q)
+      f[1] = f[1] + E * A * eps
+      f[4] = f[4] - E * A * eps
+      f[3] = f[3] + E * I * kap
+      f[6] = f[6] - E * I * kap
     elseif t == "M" then
       local m0 = q.m or 0
       local xi = acotar(q.a or 0, L) / L
