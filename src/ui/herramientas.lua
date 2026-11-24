@@ -2,6 +2,7 @@
 -- Herramientas: sel (Seleccionar/mover), nodo, barra, apoyo, carga. "Resolver" es una accion.
 -- Estado publico (lo lee ui.dibujo): H.tool, H.sel, H.barra_a, H.hover, H.msg, H.botones, H.sb_h,
 --   H.texto_estado(), H.texto_coord().
+--   H.selector (pastillas Marco | Cercha), H.set_modo(tipo), H.alternar_modo().
 -- Toda modificacion del modelo pasa por ED.hacer (deshacer) y termina en un redibujado.
 local ED = require("ui.modelo_ed")
 local V = require("ui.vista")
@@ -86,10 +87,22 @@ local function layout_botones()
   end
 end
 
+-- Selector Marco | Cercha: esquina superior izquierda del lienzo (geometria fija, sin medir texto)
+H.selector = { x = 3, y = H.TB_H + 2, w = 98, h = 15, xm = 3, wm = 44, xc = 47, wc = 54 }
+local function layout_selector()
+  local sl = H.selector
+  sl.y = V.rect.y + 2
+end
+local function en_selector(x, y)
+  local sl = H.selector
+  return x >= sl.x and x < sl.x + sl.w and y >= sl.y and y < sl.y + sl.h
+end
+
 function H.resize(w, h)
   WW, HH = w, h
   V.set_rect(0, H.TB_H, w, h - H.TB_H - H.sb_h)
   layout_botones()
+  layout_selector()
   D.size(w, h)
 end
 
@@ -116,6 +129,7 @@ function H.init()
       H.tool_prev = H.tool
       H.tool = "sel"
       H.barra_a = nil
+      H.cadena_sucia = false
     elseif antes ~= nil and ahora == nil then
       if H.tool_prev then H.tool = H.tool_prev end
       H.tool_prev = nil
@@ -230,73 +244,94 @@ end
 local est_key = {}
 local est_txt = ""
 
+local function nombre_modo()
+  return (ED.props.tipo == "cercha") and "Cercha" or "Marco"
+end
+H.nombre_modo = nombre_modo
+
 function H.texto_estado()
   if Res.modo then return Res.estado() or "" end
-  local t, s, a, v = H.tool, H.sel, H.barra_a, H.ver
+  local t, s, a, v, tp = H.tool, H.sel, H.barra_a, H.ver, ED.props.tipo
   if est_key.t == t and est_key.s == s and est_key.si == (s and s.i) and est_key.a == a and est_key.v == v
-     and est_key.d == (drag ~= nil) then
+     and est_key.d == (drag ~= nil) and est_key.tp == tp then
     return est_txt
   end
-  est_key.t, est_key.s, est_key.si, est_key.a, est_key.v, est_key.d = t, s, s and s.i, a, v, (drag ~= nil)
+  est_key.t, est_key.s, est_key.si, est_key.a, est_key.v, est_key.d, est_key.tp =
+    t, s, s and s.i, a, v, (drag ~= nil), tp
   local m = ED.m
   local r
   if drag then
-    r = "Mueve el cursor y haz clic para soltar (ESC cancela)"
+    r = "Clic para soltar (ESC cancela)"
   elseif t == "sel" then
     if s and s.t == "nodo" and m.nodos[s.i] then
-      r = "Nodo " .. s.i .. ": ENTER edita, DEL borra, M mueve"
+      r = "Nodo " .. s.i .. ": ENTER edita, DEL borra"
     elseif s and s.t == "barra" and m.barras[s.i] then
       local b = m.barras[s.i]
-      r = "Barra " .. s.i .. " (" .. b.ni .. "-" .. b.nj .. ", L=" .. fmt(ED.longitud(m, s.i)) .. " m): ENTER edita, C cargas"
+      r = "Barra " .. s.i .. " (" .. b.ni .. "-" .. b.nj .. ") L=" .. fmt(ED.longitud(m, s.i)) .. " m"
+      if #r <= 22 then r = r .. ": ENTER edita" end
     else
-      r = "Seleccionar: clic en nodo/barra, arrastra para mover"
+      r = "Seleccionar: clic o arrastra"
     end
   elseif t == "nodo" then
-    r = "Nodo - Clic: crear (sobre una barra la divide). ENTER: x,y"
+    r = "Nodo: clic crea, ENTER: x,y"
   elseif t == "barra" then
-    if a then r = "Barra - Clic en el nodo B (ESC termina)"
-    else r = "Barra - Clic en el nodo A (o en vacio; sobre barra: divide)" end
+    if a then r = nombre_modo() .. ": clic nodo B (ESC termina)"
+    else r = nombre_modo() .. ": clic nodo A (K cambia)" end
   elseif t == "apoyo" then
-    r = "Apoyo - Clic en un nodo para elegir el tipo"
+    r = "Apoyo: clic en un nodo"
   else
-    r = "Carga - Clic en un nodo o en una barra"
+    r = "Carga: clic en nodo o barra"
   end
   est_txt = r
   return r
 end
 
-local ct = { en = nil, wx = nil, wy = nil, nn = nil, nb = nil, si = nil, cv = nil, s = "" }
-function H.texto_coord()
+-- Parte derecha de la barra de estado: coordenadas del cursor y clasificacion (o recuento y snap)
+local ct = { en = nil, wx = nil, wy = nil, nn = nil, nb = nil, si = nil, cv = nil, coord = "", cls = "" }
+function H.texto_coord_partes()
   local hv, m = H.hover, ED.m
   Res.clasif()
   local cls = Res.clasif_texto()
   if Res.modo then
-    if Res.cur then return "" end
-    return cls
+    if Res.cur then return "", "" end
+    return "", cls
   end
   local nn, nb = #m.nodos, #m.barras
   local en = hv.en_lienzo
-  local st = V.snap_valor()
   if ct.en == en and ct.wx == hv.wx and ct.wy == hv.wy and ct.nn == nn and ct.nb == nb and ct.si == V.snap_i
      and ct.cv == Res.cl_ver then
-    return ct.s
+    return ct.coord, ct.cls
   end
   ct.en, ct.wx, ct.wy, ct.nn, ct.nb, ct.si, ct.cv = en, hv.wx, hv.wy, nn, nb, V.snap_i, Res.cl_ver
-  -- clasificacion siempre visible; coordenadas y snap si caben
-  local s = cls
-  local coord = en and ("x=" .. fmt(hv.wx) .. " y=" .. fmt(hv.wy)) or nil
-  if coord then s = (s ~= "") and (coord .. " | " .. s) or coord end
-  if nn == 0 or s == "" then
+  local coord = en and ("x=" .. fmt(hv.wx) .. " y=" .. fmt(hv.wy)) or ""
+  if cls == "" then
+    local st = V.snap_valor()
     local sn = (st and st > 0) and ("snap " .. fmt(st)) or "libre"
-    s = (s ~= "") and (s .. " | " .. sn) or (nn .. "N " .. nb .. "B | " .. sn)
+    cls = nn .. "N " .. nb .. "B | " .. sn
   end
-  ct.s = s
-  return ct.s
+  ct.coord, ct.cls = coord, cls
+  return coord, cls
+end
+
+function H.texto_coord()
+  local c, k = H.texto_coord_partes()
+  if c ~= "" and k ~= "" then return c .. " | " .. k end
+  return (c ~= "") and c or k
 end
 
 -- ---------------------------------------------------------- acciones basicas
+-- Fin de la cadena de barras (ESC o cambio de herramienta): con vista automatica se encuadra el modelo
+function H.fin_cadena()
+  H.barra_a = nil
+  if H.cadena_sucia then
+    H.cadena_sucia = false
+    if V.auto and #ED.m.nodos > 0 and not Res.modo then V.encuadrar(ED.m) end
+  end
+end
+
 function H.set_tool(t)
   if Res.modo then H.salir_resultados() end
+  if H.tool == "barra" and t ~= "barra" then H.fin_cadena() end
   H.tool = t
   H.barra_a = nil
   H.msg = nil
@@ -308,6 +343,7 @@ end
 
 function H.encuadrar()
   V.encuadrar(ED.m)
+  Res.camara_cambio()
   redraw()
 end
 
@@ -316,6 +352,47 @@ function H.zoom(f)
   if hv.en_lienzo then V.zoom(f, hv.px, hv.py) else V.zoom(f) end
   if hv.px then actualizar_hover(hv.px, hv.py) end
   redraw()
+end
+
+-- ------------------------------------------------- modo Marco / Cercha (v1.1)
+-- El modo es ED.props.tipo: cada barra nueva nace con ese tipo.
+H.pend = nil       -- { e, tipo, msg }: ENTER aplica el nuevo tipo a la barra que estaba seleccionada
+
+function H.set_modo(tipo)
+  tipo = (tipo == "cercha") and "cercha" or "portico"
+  local cambio = ED.props.tipo ~= tipo
+  ED.set_tipo(tipo)
+  if cambio and document and document.markChanged then document.markChanged() end
+  local nom = nombre_modo()
+  local s = H.sel
+  H.pend = nil
+  if cambio and not Res.modo and s and s.t == "barra" and ED.m.barras[s.i] and ED.m.barras[s.i].tipo ~= tipo then
+    aviso("Modo " .. nom .. ". ENTER: aplicar también a la barra " .. s.i)
+    H.pend = { e = s.i, tipo = tipo, msg = H.msg }
+  else
+    aviso("Modo " .. nom .. ": las barras nuevas serán " .. (tipo == "cercha" and "cercha" or "de marco"))
+  end
+  redraw()
+end
+
+function H.alternar_modo()
+  H.set_modo(ED.props.tipo == "cercha" and "portico" or "cercha")
+end
+
+-- Aplica el tipo a todas las barras (un solo paso de deshacer)
+function H.convertir_todo(tipo)
+  tipo = (tipo == "cercha") and "cercha" or "portico"
+  local nom = (tipo == "cercha") and "cercha" or "marco"
+  if #ED.m.barras == 0 then aviso("No hay barras que convertir", true); return end
+  local n = 0
+  local ok = ED.hacer(function(m)
+    n = ED.convertir_todo(m, tipo)
+    if n == 0 then return nil, "Todas las barras ya son " .. nom end
+    return true
+  end)
+  ED.set_tipo(tipo)
+  if ok then aviso(n .. ((n == 1) and " barra convertida a " or " barras convertidas a ") .. nom .. " (U deshace)")
+  else aviso("Todas las barras ya son " .. nom) end
 end
 
 function H.toggle_rejilla()
@@ -392,6 +469,8 @@ end
 local function asegurar_visible(i)
   local n = ED.m.nodos[i]
   if not n then return end
+  -- con una cadena de barras en curso nunca se mueve la vista entre clics (se encuadra al terminar)
+  if H.tool == "barra" and H.barra_a then return end
   local R = V.rect
   local sx, sy = V.a_pantalla(n.x, n.y)
   if sx < R.x + 14 or sx > R.x + R.w - 14 or sy < R.y + 14 or sy > R.y + R.h - 14 then
@@ -400,6 +479,22 @@ local function asegurar_visible(i)
 end
 
 -- --------------------------------------------------------------- resolver
+-- Sugerencia (una sola vez por modelo): marco dibujado con cargas solo en nudos que funciona como cercha
+local function sugerir_cercha()
+  local m = ED.m
+  if H.sug_hecho or not ED.parece_cercha(m) then return end
+  H.sug_hecho = true
+  D.menu({
+    titulo = "Cercha detectada",
+    msg = "Parece una cercha (cargas solo en nudos). ¿Convertir las " .. #m.barras .. " barras a cercha?",
+    items = { "Convertir a cercha", "Mantener marco" },
+    ancho = 270,
+    elegir = function(k)
+      if k == 1 then H.convertir_todo("cercha") end
+    end,
+  })
+end
+
 function H.resolver()
   if Res.modo then Res.tecla("r"); redraw(); return end
   local ok, S = pcall(require, "core.solver")
@@ -413,7 +508,14 @@ function H.resolver()
     return
   end
   local ok2, msg = Res.resolver(S, m)
-  if ok2 then aviso(msg or "Resuelto") else aviso(msg or "No se pudo resolver", true) end
+  if ok2 then
+    -- al mostrar resultados: encuadre si la vista es automatica, hay nodos fuera o el modelo se ve diminuto
+    if V.conviene_encuadrar(m) then V.encuadrar(m); Res.camara_cambio() end
+    aviso(msg or "Resuelto")
+    sugerir_cercha()
+  else
+    aviso(msg or "No se pudo resolver", true)
+  end
 end
 
 -- Vuelve al modo modelado (y a la herramienta que habia)
@@ -928,8 +1030,9 @@ local function dividir_en_clic(t)
   end)
   if not ok then aviso(msg, true); return nil end
   H.sel = { t = "nodo", i = idx }
-  aviso("Barra " .. e .. " dividida: nodo " .. idx .. " a " .. fmt(a2) .. " m (barras " .. e .. " y " .. e2 .. ")"
-    .. (tipo0 == "cercha" and ", ahora porticos articulados" or "") .. ". U deshace")
+  local nuevo_tipo = ED.m.barras[e] and ED.m.barras[e].tipo
+  aviso("Nodo " .. idx .. " divide la barra " .. e .. " en " .. fmt(a2) .. " m"
+    .. ((tipo0 == "cercha" and nuevo_tipo ~= "cercha") and " (articuladas)" or "") .. ". U deshace")
   return idx
 end
 
@@ -989,6 +1092,7 @@ function H.accion(t, exacto)
     if ok then
       H.sel = nil
       H.barra_a = destino
+      H.cadena_sucia = true
       aviso("Barra " .. creada .. " creada (" .. #ED.m.nodos .. " nodos). Sigue o ESC")
       asegurar_visible(destino)
     else
@@ -1134,6 +1238,14 @@ function H.mouseDown(x, y)
     ignora_up = true
     return
   end
+  if not Res.modo and en_selector(x, y) then
+    -- pastillas Marco | Cercha: un toque fija el modo
+    ptr = nil
+    ignora_up = true
+    local sl = H.selector
+    H.set_modo((x >= sl.xc) and "cercha" or "portico")
+    return
+  end
   ptr = { x0 = x, y0 = y, moved = false, nodo = nil }
   if H.tool == "sel" then ptr.nodo = nodo_en(x, y, NODO_TOL) end
   actualizar_hover(x, y)
@@ -1237,6 +1349,11 @@ function H.editar()
 end
 
 local AYUDA = {
+  "MARCO | CERCHA: pastillas arriba a la",
+  "  izquierda del lienzo (clic), o tecla K,",
+  "  o B estando en Barra. Cada barra nueva",
+  "  nace con ese tipo. Archivo > Nuevo lo",
+  "  pregunta. Ajustes: convertir todo.",
   "HERRAMIENTAS (letra o clic en el icono)",
   "S Seleccionar   N Nodo   B Barra",
   "A Apoyo   C Carga   R Resolver",
@@ -1255,7 +1372,7 @@ local AYUDA = {
   "  Clic en un nodo: editar/borrar su carga.",
   "U deshacer   Y rehacer   E encuadrar",
   "+ / -  zoom    flechas: mover vista",
-  "G rejilla   K snap   P propiedades",
+  "G rejilla   J snap   P propiedades",
   "Q cambia unidades (kN-m, N-m, tf-m);",
   "  tambien menu Ajustes > Unidades.",
   "M mueve el nodo elegido (clic suelta)",
@@ -1267,8 +1384,26 @@ local AYUDA = {
   "antihorario. Fy < 0 = hacia abajo.",
   "El modelo siempre se guarda en kN, m.",
   "Supuestos: Euler-Bernoulli,",
-  "pequenas deformaciones, 2D lineal.",
+  "pequeñas deformaciones, 2D lineal.",
+  "Estructural v1.1 · Adrián Castro Ramírez",
 }
+
+local ACERCA = {
+  "Estructural v1.1",
+  "Autor: Adrián Castro Ramírez",
+  "Análisis estructural 2D de vigas, marcos y cerchas por el método de rigidez directa, con diagramas N, V, M y deformada.",
+  "Supuestos: elementos Euler-Bernoulli, pequeñas deformaciones, material lineal elástico, análisis 2D estático (sin P-Δ ni cortante).",
+}
+
+function H.acerca()
+  local l = {}
+  for i = 1, #ACERCA do
+    local w = D.ajustar(ACERCA[i], 270)
+    for k = 1, #w do l[#l + 1] = w[k] end
+    if i == 2 then l[#l + 1] = "" end
+  end
+  D.texto("Acerca de", l)
+end
 
 function H.ayuda()
   D.texto("Ayuda - Estructural 2D", AYUDA)
@@ -1277,6 +1412,7 @@ end
 function H.charIn(c)
   H.msg = nil
   local k = c:lower()
+  local en_res = Res.modo ~= nil
   if Res.modo then
     -- teclas del modo resultados; s/a/c/b vuelven a modelar con esa herramienta
     if k == "s" or k == "a" or k == "c" or k == "b" then
@@ -1294,7 +1430,9 @@ function H.charIn(c)
   end
   if k == "s" then H.set_tool("sel")
   elseif k == "n" then H.set_tool("nodo")
-  elseif k == "b" then H.set_tool("barra")
+  elseif k == "b" then
+    -- b estando ya en Barra alterna Marco / Cercha
+    if H.tool == "barra" and not en_res then H.alternar_modo() else H.set_tool("barra") end
   elseif k == "a" then H.set_tool("apoyo")
   elseif k == "c" then H.set_tool("carga")
   elseif k == "r" then H.resolver()
@@ -1304,7 +1442,8 @@ function H.charIn(c)
   elseif k == "+" or k == "=" then H.zoom(1.4)
   elseif k == "-" or k == "\226\136\146" or k == "_" then H.zoom(1 / 1.4)
   elseif k == "g" then H.toggle_rejilla()
-  elseif k == "k" then H.ciclar_snap()
+  elseif k == "k" then H.alternar_modo()
+  elseif k == "j" then H.ciclar_snap()
   elseif k == "x" then H.dialogo_coordenadas()
   elseif k == "p" then H.props_globales()
   elseif k == "q" then H.ciclar_unidades()
@@ -1345,6 +1484,19 @@ function H.arrow(k)
 end
 
 function H.enter()
+  local p = H.pend
+  if p and H.msg == p.msg and not Res.modo and ED.m.barras[p.e] then
+    H.pend = nil
+    local e, tipo = p.e, p.tipo
+    ED.hacer(function(m)
+      local b = m.barras[e]
+      b.tipo, b.rot_i, b.rot_j = tipo, false, false
+      return true
+    end)
+    aviso("Barra " .. e .. ": ahora " .. (tipo == "cercha" and "cercha" or "marco") .. " (U deshace)")
+    return
+  end
+  H.pend = nil
   H.msg = nil
   H.editar()
   redraw()
@@ -1359,7 +1511,7 @@ function H.esc()
     return
   end
   if H.barra_a then
-    H.barra_a = nil
+    H.fin_cadena()
     aviso("Cadena de barras terminada")
     return
   end
@@ -1383,21 +1535,53 @@ function H.tab()
 end
 
 -- ----------------------------------------------------- archivo / ejemplos
-function H.nuevo()
+-- Modelo nuevo inmediato; tipo (opcional) fija el modo de dibujo
+function H.nuevo(tipo)
   if Res.modo then H.salir_resultados() end
+  if tipo then ED.set_tipo(tipo) end
   ED.reemplazar(ED.nuevo())
-  H.sel, H.barra_a = nil, nil
+  H.sel, H.barra_a, H.cadena_sucia, H.pend = nil, nil, false, nil
+  H.sug_hecho = false
   V.encuadrar(ED.m)
   H.set_tool("barra")
-  aviso("Modelo nuevo (U deshace)")
+  aviso("Modelo nuevo: " .. nombre_modo() .. " (U deshace)")
+end
+
+-- Archivo > Nuevo: pregunta que se va a dibujar (ESC conserva el modo actual)
+local function menu_tipo(titulo, elegir, cancelar)
+  return D.menu({
+    titulo = titulo,
+    items = { "Viga / Marco", "Cercha" },
+    sel = (ED.props.tipo == "cercha") and 2 or 1,
+    ancho = 220,
+    elegir = elegir,
+    cancelar = cancelar,
+  })
+end
+
+function H.nuevo_menu()
+  if Res.modo then H.salir_resultados() end
+  menu_tipo("¿Qué vas a dibujar?",
+    function(k) H.nuevo(k == 2 and "cercha" or "portico") end,
+    function() H.nuevo() end)
+end
+
+-- Al arrancar con el modelo vacio: elegir el modo (ESC conserva el actual)
+H.dialogo_inicio = nil
+function H.preguntar_inicio()
+  H.dialogo_inicio = menu_tipo("¿Qué vas a dibujar?",
+    function(k) H.set_modo(k == 2 and "cercha" or "portico") end, nil)
+  return H.dialogo_inicio
 end
 
 function H.ejemplo(nombre)
   local m, msg = ED.ejemplo(nombre)
   if not m then aviso(msg, true); return end
   ED.reemplazar(m)
-  H.sel, H.barra_a = nil, nil
+  H.sel, H.barra_a, H.cadena_sucia, H.pend = nil, nil, false, nil
+  H.sug_hecho = false
   V.encuadrar(ED.m)
+  Res.camara_cambio()
   if not Res.modo then H.set_tool("sel") end
   aviso("Ejemplo: " .. nombre .. " (U deshace)")
 end
@@ -1425,8 +1609,10 @@ function H.abrir()
     elegir = function(k)
       local ok, msg = ED.abrir(nombres[k])
       if not ok then aviso(msg, true); return end
-      H.sel, H.barra_a = nil, nil
+      H.sel, H.barra_a, H.cadena_sucia, H.pend = nil, nil, false, nil
+      H.sug_hecho = false
       V.encuadrar(ED.m)
+      Res.camara_cambio()
       aviso("Abierto: " .. nombres[k] .. " (U deshace)")
     end,
   })

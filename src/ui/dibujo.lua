@@ -174,6 +174,10 @@ local function lb_poner(x0, y0, x1, y1)
   nlbx = nlbx + 4
 end
 
+-- Zona reservada (cabecera de resultados o selector Marco/Cercha): las etiquetas de los ejes no la pisan
+local ZN = { 0, 0, 0, 0, on = false }
+local SIN_TXT = false      -- true en las vistas N/V/M/Def: cargas sin texto ni numeros de nodo
+
 -- ------------------------------------------------------------ rejilla y ejes
 local function rejilla(gc)
   local R = V.rect
@@ -213,7 +217,13 @@ local function rejilla(gc)
     local py = V.oy - k * le * V.s
     if py > R.y + 6 and py < R.y + R.h - 14 then
       gc:drawLine(R.x, r(py), R.x + 3, r(py))
-      txt(gc, fmtc(k * le), R.x + 5, py - 4, 7, "l")
+      local sl = fmtc(k * le)
+      fuente(gc, "r", 7)
+      local wl = gc:getStringWidth(sl)
+      local ty = floor(py - 4 + 0.5)
+      if not (ZN.on and R.x + 5 < ZN[3] and R.x + 5 + wl > ZN[1] and ty < ZN[4] and ty + 10 > ZN[2]) then
+        txt(gc, sl, R.x + 5, py - 4, 7, "l")
+      end
     end
   end
   txt(gc, "m", R.x + R.w - 3, R.y + R.h - 13, 7, "r")
@@ -253,6 +263,7 @@ local function sentido(sx, sy, modo)
 end
 
 local NX, NY = {}, {}
+local NCNT, NRIG = {}, {}     -- barras que concurren en cada nodo / alguna llega rigida (modelo())
 
 local function vecinos(m, i, px, py)
   local sx, sy = 0, 0
@@ -347,6 +358,7 @@ local function dir_mundo(dir, sg, cb, sb)
 end
 
 local function etiqueta_carga(gc, s, tx, ty, dx, dy)
+  if SIN_TXT then return end
   -- texto 7 pt centrado, desplazado del extremo de la flecha en el sentido contrario a la fuerza.
   -- Si choca con otra etiqueta ya colocada se apila: sigue alejandose del extremo (paso de 10 px) y
   -- luego prueba a los lados.
@@ -511,9 +523,17 @@ local function modelo(gc, H)
     local b = m.barras[e]
     local x1, y1, x2, y2 = NX[b.ni], NY[b.ni], NX[b.nj], NY[b.nj]
     setc(gc, C.barra)
-    pen(gc, b.tipo == "cercha" and "thin" or "medium")
+    pen(gc, "medium")
     ln(gc, x1, y1, x2, y2)
-    if b.tipo == "cercha" then ln(gc, x1, y1 + 1, x2, y2 + 1) end
+  end
+  -- nudos articulados: todas las barras que concurren son cercha o tienen rotula en ese extremo
+  for i = 1, nn do NCNT[i], NRIG[i] = 0, false end
+  for e = 1, nb do
+    local b = m.barras[e]
+    local ri, rj = (b.tipo == "cercha") or b.rot_i, (b.tipo == "cercha") or b.rot_j
+    NCNT[b.ni], NCNT[b.nj] = NCNT[b.ni] + 1, NCNT[b.nj] + 1
+    if not ri then NRIG[b.ni] = true end
+    if not rj then NRIG[b.nj] = true end
   end
   -- cargas (debajo de los apoyos)
   setc(gc, C.carga); pen(gc, "thin")
@@ -528,24 +548,35 @@ local function modelo(gc, H)
     local ap = m.nodos[i].apoyo
     if ap then apoyo(gc, m, i, ap) end
   end
-  -- rotulas (circulo hueco cerca del extremo)
+  -- cerchas: circulo hueco a 6 px de cada extremo; porticos con rotula: a 8 px (si el nudo no es ya un anillo)
   pen(gc, "thin")
   for e = 1, nb do
     local b = m.barras[e]
-    if b.tipo ~= "cercha" and (b.rot_i or b.rot_j) then
-      local x1, y1, x2, y2 = NX[b.ni], NY[b.ni], NX[b.nj], NY[b.nj]
-      local dx, dy = x2 - x1, y2 - y1
-      local l = sqrt(dx * dx + dy * dy)
-      if l > 20 then
+    local x1, y1, x2, y2 = NX[b.ni], NY[b.ni], NX[b.nj], NY[b.nj]
+    local dx, dy = x2 - x1, y2 - y1
+    local l = sqrt(dx * dx + dy * dy)
+    if b.tipo == "cercha" then
+      -- solo en extremos cuyo nudo es rigido (en nudo articulado ya se dibuja el anillo del nudo)
+      if l >= 24 then
         local ux, uy = dx / l, dy / l
-        if b.rot_i then
-          setc(gc, C.rotula); disco(gc, x1 + ux * 8, y1 + uy * 8, 3.5)
-          setc(gc, C.barra); anillo(gc, x1 + ux * 8, y1 + uy * 8, 3.5)
+        if NRIG[b.ni] then
+          setc(gc, C.rotula); disco(gc, x1 + ux * 6, y1 + uy * 6, 2.5)
+          setc(gc, C.barra); anillo(gc, x1 + ux * 6, y1 + uy * 6, 2.5)
         end
-        if b.rot_j then
-          setc(gc, C.rotula); disco(gc, x2 - ux * 8, y2 - uy * 8, 3.5)
-          setc(gc, C.barra); anillo(gc, x2 - ux * 8, y2 - uy * 8, 3.5)
+        if NRIG[b.nj] then
+          setc(gc, C.rotula); disco(gc, x2 - ux * 6, y2 - uy * 6, 2.5)
+          setc(gc, C.barra); anillo(gc, x2 - ux * 6, y2 - uy * 6, 2.5)
         end
+      end
+    elseif (b.rot_i or b.rot_j) and l > 20 then
+      local ux, uy = dx / l, dy / l
+      if b.rot_i and not (NCNT[b.ni] > 0 and not NRIG[b.ni]) then
+        setc(gc, C.rotula); disco(gc, x1 + ux * 8, y1 + uy * 8, 3.5)
+        setc(gc, C.barra); anillo(gc, x1 + ux * 8, y1 + uy * 8, 3.5)
+      end
+      if b.rot_j and not (NCNT[b.nj] > 0 and not NRIG[b.nj]) then
+        setc(gc, C.rotula); disco(gc, x2 - ux * 8, y2 - uy * 8, 3.5)
+        setc(gc, C.barra); anillo(gc, x2 - ux * 8, y2 - uy * 8, 3.5)
       end
     end
   end
@@ -567,7 +598,12 @@ local function modelo(gc, H)
   end
   -- nodos
   for i = 1, nn do
-    setc(gc, C.nodo); disco(gc, NX[i], NY[i], 3)
+    if NCNT[i] > 0 and not NRIG[i] then
+      setc(gc, C.rotula); disco(gc, NX[i], NY[i], 4)
+      setc(gc, C.nodo); anillo(gc, NX[i], NY[i], 4)
+    else
+      setc(gc, C.nodo); disco(gc, NX[i], NY[i], 3)
+    end
   end
   if sel and sel.t == "nodo" and m.nodos[sel.i] then
     setc(gc, C.sel); disco(gc, NX[sel.i], NY[sel.i], 4); anillo(gc, NX[sel.i], NY[sel.i], 7)
@@ -578,7 +614,7 @@ local function modelo(gc, H)
   end
   -- numeros de nodo: en la diagonal mas libre de barras, apoyos y cargas
   setc(gc, C.etiq)
-  for i = 1, nn do
+  for i = 1, (SIN_TXT and 0 or nn) do
     local px, py = NX[i], NY[i]
     local nd = m.nodos[i]
     local mejor, mx, my = 2, 1, -1
@@ -732,54 +768,102 @@ local function barra_estado(gc, H)
   setc(gc, C.sb); gc:fillRect(0, sy, WW, H.sb_h)
   setc(gc, C.tb_borde); gc:drawLine(0, sy, WW - 1, sy)
   local msg = H.msg
-  local der = H.texto_coord()
-  fuente(gc, "r", 7)
-  local wd = (not msg and der and der ~= "") and gc:getStringWidth(der) or 0
-  local izq, tam = nil, 9
+  local izq
   if msg then izq = msg.t; setc(gc, msg.err and C.err or C.info)
   else izq = H.texto_estado(); setc(gc, C.texto) end
-  fuente(gc, "r", 9)
-  local maxw = WW - 8 - (wd > 0 and wd + 6 or 0)
-  if gc:getStringWidth(izq) > maxw then
-    tam = 7
+  -- derecha: coordenadas + clasificacion; si no caben, solo la clasificacion (tiene prioridad)
+  local coord, cls = "", ""
+  if not msg then coord, cls = H.texto_coord_partes() end
+  local full = (coord ~= "" and cls ~= "") and (coord .. " | " .. cls) or (coord ~= "" and coord or cls)
+  local tam, der = 9, ""
+  local ok = false
+  for ti = 1, 2 do
+    local t = (ti == 1) and 9 or 7
+    fuente(gc, "r", t)
+    local wi = gc:getStringWidth(izq)
     fuente(gc, "r", 7)
-    if gc:getStringWidth(izq) > maxw then
-      -- recorta con ".." para no pisar el texto de la derecha
-      local n = #izq
-      while n > 4 and gc:getStringWidth(izq:sub(1, n) .. "..") > maxw do n = n - 1 end
-      izq = izq:sub(1, n) .. ".."
+    for k = 1, 2 do
+      local d = (k == 1) and full or cls
+      local wd = (d ~= "") and (gc:getStringWidth(d) + 6) or 0
+      if wi + wd <= WW - 8 then tam, der, ok = t, d, true; break end
     end
+    if ok then break end
   end
+  if not ok then
+    -- no cabe ni a 7 pt: se recorta el texto de la izquierda para no pisar la clasificacion
+    tam, der = 7, cls
+    fuente(gc, "r", 7)
+    local wd = (der ~= "") and (gc:getStringWidth(der) + 6) or 0
+    local maxw = WW - 8 - wd
+    local n = #izq
+    while n > 4 and gc:getStringWidth(izq:sub(1, n) .. "..") > maxw do n = n - 1 end
+    izq = izq:sub(1, n) .. ".."
+  end
+  fuente(gc, "r", tam)
   gc:drawString(izq, 4, sy + (tam == 9 and 1 or 3), "top")
-  if wd > 0 then
+  if der ~= "" then
     setc(gc, C.etiq)
     fuente(gc, "r", 7)
-    gc:drawString(der, WW - 4 - wd, sy + 3, "top")
+    gc:drawString(der, WW - 4 - gc:getStringWidth(der), sy + 3, "top")
+  end
+end
+
+-- Selector Marco | Cercha (esquina superior izquierda del lienzo, modo modelado)
+local function selector_tipo(gc, H)
+  local sl = H.selector
+  if not sl then return end
+  local cercha = (ED.props.tipo == "cercha")
+  for k = 1, 2 do
+    local x, w = (k == 1) and sl.xm or sl.xc, (k == 1) and sl.wm or sl.wc
+    local on = (k == 2) == cercha
+    if on then setc(gc, C.tb_act) else setc(gc, C.fondo) end
+    gc:fillRect(x, sl.y, w, sl.h)
+    if on then setc(gc, C.tb_act_b); pen(gc, "medium") else setc(gc, C.tb_borde); pen(gc, "thin") end
+    gc:drawRect(x, sl.y, w, sl.h)
+    pen(gc, "thin")
+    setc(gc, on and C.tb_act_b or C.texto)
+    txt(gc, (k == 1) and "Marco" or "Cercha", x + floor(w / 2), sl.y + 2, 9, "c", on and "b" or "r")
   end
 end
 
 -- --------------------------------------------------------------------- todo
 -- primitivas que usa ui.resultados (evita duplicar recorte y fuentes)
+P.VERSION = "v1.1"
+P.AUTOR = "Estructural v1.1 · Adrián Castro Ramírez"
 local PRIM = { setc = setc, pen = pen, ln = ln, txt = txt, r = r, disco = disco, anillo = anillo,
-               punta = punta, fuente = fuente, C = C }
+               punta = punta, fuente = fuente, C = C, ocupado = lb_libre }
 
 function P.pintar(gc, H)
   fcur_s, fcur_z = nil, nil
   nlbx, nltt = 0, 0
   setc(gc, C.fondo); gc:fillRect(0, 0, WW, HH)
+  local modo = Res.modo
+  SIN_TXT = (modo == "N" or modo == "V" or modo == "M" or modo == "def")
+  ZN.on = false
+  if modo then
+    if Res.zona_cabecera(gc, PRIM, ZN) then ZN.on = true end
+  elseif H.selector then
+    local sl = H.selector
+    ZN[1], ZN[2], ZN[3], ZN[4], ZN.on = sl.x, sl.y, sl.x + sl.w, sl.y + sl.h, true
+    lb_poner(sl.x - 2, sl.y - 2, sl.x + sl.w + 2, sl.y + sl.h + 2)
+  end
   if not Res.pantalla_completa() then
     rejilla(gc)
     modelo(gc, H)
   end
   Res.pintar(gc, V, ED.m, PRIM)
   guia_cursor(gc, H)
-  if #ED.m.nodos == 0 and not Res.modo then
+  if #ED.m.nodos == 0 and not modo then
     local R = V.rect
     setc(gc, C.etiq)
     txt(gc, "Modelo vacio", R.x + R.w / 2, R.y + R.h / 2 - 24, 12, "c", "b")
     txt(gc, "Herramienta Barra: haz clic en dos puntos", R.x + R.w / 2, R.y + R.h / 2 - 6, 9, "c")
-    txt(gc, "Menu > Archivo > Ejemplos para empezar", R.x + R.w / 2, R.y + R.h / 2 + 8, 9, "c")
+    txt(gc, "Elige Marco o Cercha arriba a la izquierda", R.x + R.w / 2, R.y + R.h / 2 + 8, 9, "c")
+    txt(gc, "Menu > Archivo > Ejemplos para empezar", R.x + R.w / 2, R.y + R.h / 2 + 22, 9, "c")
+    setc(gc, C.gris)
+    txt(gc, P.AUTOR, R.x + R.w - 4, R.y + 3, 7, "r")
   end
+  if not modo then selector_tipo(gc, H) end
   barra_herramientas(gc, H)
   barra_estado(gc, H)
 end

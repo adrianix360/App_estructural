@@ -459,16 +459,34 @@ local function mover_cursor(k)
 end
 
 -- ------------------------------------------------------------ cache: diagramas
+-- Por campo (N, V, M): muestras por barra en coordenadas de barra, maximo global, 1/maxabs (inv) y la lista
+-- plana de candidatos a etiqueta ya ORDENADA (maximo y minimo globales primero, luego prioridad 1 =
+-- maximo |val| de cada barra, luego prioridad 2 = demas extremos; dentro de cada grupo |val| descendente).
+-- La altura en pantalla (px por unidad) depende de la camara y se calcula al pintar (kpx_de).
+local PRIO_MIN = 0.02            -- se descartan etiquetas con |val| < 2 % del maximo
+local MAX_ETQ = 12               -- tope de etiquetas de diagrama
+local L_CORTA = 40               -- barras de menos de 40 px solo llevan su etiqueta principal
+
+local function cmp_cand(a, b)
+  if a.g ~= b.g then return a.g end
+  if a.prio ~= b.prio then return a.prio < b.prio end
+  local va, vb = abs(a.val), abs(b.val)
+  if va ~= vb then return va > vb end
+  if a.e ~= b.e then return a.e < b.e end
+  return a.x < b.x
+end
+
 local function cache_diag(campo)
   local c = cache[campo]
   if c then return c end
-  local res = R.res
-  c = { campo = campo, bars = {}, maxabs = 0 }
+  local res, m = R.res, ED.m
+  c = { campo = campo, bars = {}, maxabs = 0, inv = 0, cand = {}, ncand = 0, Lmin = 1e30, Lmax = 0,
+        trivial = false, solo_cercha = true, ntruss = 0 }
   local nb = #res.barras
   for e = 1, nb do
     local mu = E.muestras(res, e, campo, 41)
     local n = #mu / 2
-    local b = { n = n, xs = {}, vs = {}, lab = {}, ceros = {} }
+    local b = { n = n, xs = {}, vs = {}, ceros = {}, flat = false }
     for i = 1, n do
       local v = mu[2 * i]
       b.xs[i], b.vs[i] = mu[2 * i - 1], v
@@ -479,10 +497,23 @@ local function cache_diag(campo)
     for i = 1, #b.ex do
       if abs(b.ex[i].val) > c.maxabs then c.maxabs = abs(b.ex[i].val) end
     end
+    local L = res.barras[e].L
+    if L < c.Lmin then c.Lmin = L end
+    if L > c.Lmax then c.Lmax = L end
+    local mb = m.barras[e]
+    if not (mb and mb.tipo == "cercha") then c.solo_cercha = false end
     c.bars[e] = b
   end
-  local tiny = 1e-6 * c.maxabs
-  if c.maxabs > 1e-9 then
+  if c.Lmin > 1e29 then c.Lmin = 1 end
+  if campo ~= "N" then
+    -- cercha: M y V son (casi) cero frente a N·L -> se avisa en vez de dibujar ruido
+    local cn = cache_diag("N")
+    c.trivial = c.maxabs <= 1e-6 * cn.maxabs * c.Lmax
+  end
+  local cand, nc = c.cand, 0
+  if c.maxabs > 1e-9 and not c.trivial then
+    c.inv = 1 / c.maxabs
+    local tiny = PRIO_MIN * c.maxabs
     for e = 1, nb do
       local b = c.bars[e]
       local L = res.barras[e].L
@@ -491,16 +522,31 @@ local function cache_diag(campo)
         if b.vs[i] < vmin then vmin = b.vs[i] end
         if b.vs[i] > vmax then vmax = b.vs[i] end
       end
+      local mb = m.barras[e]
       if vmax - vmin <= 1e-9 * c.maxabs then
-        -- campo constante (p. ej. N en una cercha): una sola etiqueta en el centro
-        if abs(vmax) > tiny then
-          b.lab[1] = { x = L / 2, val = vmax, txt = num(conv(campo, vmax)) }
+        -- campo constante (N en una cercha): sin diagrama en la vista N; barra coloreada y un valor
+        if campo == "N" and mb and mb.tipo == "cercha" then
+          b.flat = true
+          b.val = vmax
+          b.cero = abs(vmax) < 1e-6 * c.maxabs
+          b.txt = b.cero and "0" or num(conv(campo, vmax))
+          c.ntruss = c.ntruss + 1
+        elseif abs(vmax) > tiny then
+          nc = nc + 1
+          cand[nc] = { e = e, x = L / 2, val = vmax, txt = num(conv(campo, vmax)), prio = 1, g = false }
         end
       else
+        -- extremos de la barra: el de mayor |val| es prioridad 1; los demas, prioridad 2
         local ex = b.ex
+        local mejor, bv = nil, -1
         for i = 1, #ex do
-          if abs(ex[i].val) > tiny then
-            b.lab[#b.lab + 1] = { x = ex[i].x, val = ex[i].val, txt = num(conv(campo, ex[i].val)) }
+          if abs(ex[i].val) > bv then mejor, bv = i, abs(ex[i].val) end
+        end
+        for i = 1, #ex do
+          if abs(ex[i].val) >= tiny then
+            nc = nc + 1
+            cand[nc] = { e = e, x = ex[i].x, val = ex[i].val, txt = num(conv(campo, ex[i].val)),
+                         prio = (i == mejor) and 1 or 2, g = false }
           end
         end
       end
@@ -511,13 +557,42 @@ local function cache_diag(campo)
         end
       end
     end
-    local R0 = V0.rect
-    c.kpx = 0.12 * min(R0.w, R0.h) / c.maxabs
-  else
-    c.kpx = 0
+    -- maximo y minimo globales: primero en la lista
+    local imax, imin
+    for q = 1, nc do
+      if not imax or cand[q].val > cand[imax].val then imax = q end
+      if not imin or cand[q].val < cand[imin].val then imin = q end
+    end
+    if imax and cand[imax].val > 0 then cand[imax].g = true end
+    if imin and cand[imin].val < 0 then cand[imin].g = true end
+    table.sort(cand, cmp_cand)
   end
+  c.ncand = nc
   cache[campo] = c
   return c
+end
+
+-- Altura maxima del diagrama en pantalla: 30 % de la barra mas corta (en px), entre 6 px y el 12 % del
+-- lado menor del lienzo
+local function hmax_px(c)
+  local R0 = V0.rect
+  local h = 0.30 * c.Lmin * V0.s
+  local tope = 0.12 * min(R0.w, R0.h)
+  if h > tope then h = tope end
+  if h < 6 then h = 6 end
+  return h
+end
+-- px por unidad del campo (sin el multiplicador de escala del usuario)
+local function kpx_de(c)
+  if c.inv == 0 then return 0 end
+  return hmax_px(c) * c.inv
+end
+
+-- Para las pruebas: altura maxima (px) del diagrama del campo y longitud en px de la barra mas corta
+function R.hmax_px(campo)
+  if not R.res then return nil end
+  local c = cache_diag(campo)
+  return hmax_px(c), c.Lmin * V0.s
 end
 
 -- ------------------------------------------------------------ cache: deformada
@@ -615,8 +690,22 @@ local function libre(x0, y0, x1, y1)
   for i = 1, nlb, 4 do
     if x0 < LB[i + 2] and x1 > LB[i] and y0 < LB[i + 3] and y1 > LB[i + 1] then return false end
   end
+  -- etiquetas del modelo (cargas, numeros de nodo) ya colocadas por ui.dibujo
+  if PRm and PRm.ocupado and not PRm.ocupado(x0, y0, x1, y1) then return false end
   return true
 end
+
+-- Rectangulos de las etiquetas de valores colocadas en este cuadro (para las pruebas: R.etiquetas())
+local EQ, EQT, neq = {}, {}, 0
+function R.etiquetas()
+  local t = {}
+  for i = 1, neq do
+    t[i] = { x0 = EQ[4 * i - 3], y0 = EQ[4 * i - 2], x1 = EQ[4 * i - 1], y1 = EQ[4 * i], txt = EQT[i] }
+  end
+  return t
+end
+-- cajas de nodo reservadas (+-5 px) en el ultimo cuadro
+function R.caja_nodo() return 5 end
 
 -- Etiqueta de 7 pt junto a (cx,cy), preferentemente desplazada en la direccion (ux,uy); si choca con
 -- otra ya colocada prueba el lado opuesto, los laterales y distancias mayores. Fondo blanco.
@@ -646,6 +735,8 @@ local function etiqueta(gc, s, cx, cy, ux, uy, col)
       nlb = nlb + 4
       nlt = nlt + 1
       LT[nlt], LX[nlt], LY[nlt] = s, cx, cy
+      neq = neq + 1
+      EQ[4 * neq - 3], EQ[4 * neq - 2], EQ[4 * neq - 1], EQ[4 * neq], EQT[neq] = bx - 1, by, bx + w + 1, by + 10, s
       PR.setc(gc, PR.C.fondo)
       gc:fillRect(bx - 1, by, w + 2, 10)
       PR.setc(gc, col)
@@ -654,6 +745,42 @@ local function etiqueta(gc, s, cx, cy, ux, uy, col)
     end
   end
   return false
+end
+
+-- Etiqueta de valor de un diagrama: solo DOS intentos, a 1x de distancia, del lado de (ux,uy) y del opuesto.
+-- Si ambos chocan se descarta (el valor sigue disponible al apuntar). Devuelve true si se dibujo (o si ya
+-- habia el mismo texto en el mismo ancla).
+local function etiqueta2(gc, s, cx, cy, ux, uy, col)
+  local PR = PRm
+  PR.fuente(gc, "r", 7)
+  local w = gc:getStringWidth(s)
+  local R0 = V0.rect
+  for i = 1, nlt do
+    if LT[i] == s and abs(LX[i] - cx) < 6 and abs(LY[i] - cy) < 6 then return true, true end
+  end
+  for intento = 0, 1 do
+    local sg = (intento == 0) and 1 or -1
+    local dx, dy = ux * sg, uy * sg
+    local off = abs(dx) * (w / 2 + 4) + abs(dy) * 8
+    local bx = floor(cx + dx * off - w / 2 + 0.5)
+    local by = floor(cy + dy * off - 5 + 0.5)
+    if bx < R0.x + 2 then bx = R0.x + 2 elseif bx + w > R0.x + R0.w - 2 then bx = R0.x + R0.w - 2 - w end
+    if by < R0.y + 1 then by = R0.y + 1 elseif by + 10 > R0.y + R0.h - 1 then by = R0.y + R0.h - 11 end
+    if libre(bx - 1, by, bx + w + 1, by + 10) then
+      LB[nlb + 1], LB[nlb + 2], LB[nlb + 3], LB[nlb + 4] = bx - 1, by, bx + w + 1, by + 10
+      nlb = nlb + 4
+      nlt = nlt + 1
+      LT[nlt], LX[nlt], LY[nlt] = s, cx, cy
+      neq = neq + 1
+      EQ[4 * neq - 3], EQ[4 * neq - 2], EQ[4 * neq - 1], EQ[4 * neq], EQT[neq] = bx - 1, by, bx + w + 1, by + 10, s
+      PR.setc(gc, PR.C.fondo)
+      gc:fillRect(bx - 1, by, w + 2, 10)
+      PR.setc(gc, col)
+      gc:drawString(s, bx, by, "top")
+      return true, false
+    end
+  end
+  return false, false
 end
 
 local function momento_arco(gc, cx, cy, rad, antihorario)
@@ -736,76 +863,115 @@ local function pintar_reac(gc)
 end
 
 -- ----------------------------------------------------------- pintado: diagramas
+local COL_TRAC, COL_COMP, COL_CERO = { 20, 70, 225 }, { 215, 30, 30 }, { 150, 150, 160 }
+
 local function pintar_diag(gc, campo)
   local PR = PRm
   local res = R.res
   local c = cache_diag(campo)
-  if c.kpx == 0 then return end
-  local k = c.kpx * R.kd[campo]
-  if campo == "M" then k = -k end           -- M del lado traccionado
   local S = V0.s
   local col, tin = COL[campo], TINTE[campo]
   local nb = #res.barras
-  for e = 1, nb do
-    local rb, b = res.barras[e], c.bars[e]
-    local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
-    local dx, dy = rb.c * S, -rb.s * S
-    local nx, ny = -rb.s, -rb.c
-    -- rayado ligero (perpendicular a la barra)
-    PR.setc(gc, tin); PR.pen(gc, "thin")
-    for i = 1, b.n - 1 do
-      local xa, xb = b.xs[i], b.xs[i + 1]
-      if xb - xa > 1e-12 then
-        local va, vb = b.vs[i] * k, b.vs[i + 1] * k
-        local q = floor((xb - xa) * S / 5)
-        if q > 10 then q = 10 end
-        for j = 0, q do
-          local t = j / (q + 1)
-          local x = xa + (xb - xa) * t
-          local off = va + (vb - va) * t
-          if abs(off) >= 1 then
-            local bx, by = sx0 + dx * x, sy0 + dy * x
-            PR.ln(gc, bx, by, bx + nx * off, by + ny * off)
+  local k = kpx_de(c) * R.kd[campo]
+  if campo == "M" then k = -k end           -- M del lado traccionado
+  if c.inv ~= 0 or c.ntruss > 0 then
+    for e = 1, nb do
+      local rb, b = res.barras[e], c.bars[e]
+      local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
+      local dx, dy = rb.c * S, -rb.s * S
+      local nx, ny = -rb.s, -rb.c
+      if b.flat then
+        -- barra de cercha en la vista N: sin diagrama; barra gruesa (traccion azul, compresion roja)
+        PR.setc(gc, b.cero and COL_CERO or (b.val > 0 and COL_TRAC or COL_COMP))
+        PR.pen(gc, "thick")
+        PR.ln(gc, sx0, sy0, sx0 + dx * rb.L, sy0 + dy * rb.L)
+        PR.pen(gc, "thin")
+      elseif c.inv ~= 0 then
+        -- rayado ligero (perpendicular a la barra)
+        PR.setc(gc, tin); PR.pen(gc, "thin")
+        for i = 1, b.n - 1 do
+          local xa, xb = b.xs[i], b.xs[i + 1]
+          if xb - xa > 1e-12 then
+            local va, vb = b.vs[i] * k, b.vs[i + 1] * k
+            local q = floor((xb - xa) * S / 5)
+            if q > 10 then q = 10 end
+            for j = 0, q do
+              local t = j / (q + 1)
+              local x = xa + (xb - xa) * t
+              local off = va + (vb - va) * t
+              if abs(off) >= 1 then
+                local bx, by = sx0 + dx * x, sy0 + dy * x
+                PR.ln(gc, bx, by, bx + nx * off, by + ny * off)
+              end
+            end
+          end
+        end
+        -- contorno
+        PR.setc(gc, col); PR.pen(gc, "medium")
+        local px, py
+        for i = 1, b.n do
+          local x = b.xs[i]
+          local off = b.vs[i] * k
+          local qx, qy = sx0 + dx * x + nx * off, sy0 + dy * x + ny * off
+          if i == 1 then PR.ln(gc, sx0 + dx * x, sy0 + dy * x, qx, qy)
+          else PR.ln(gc, px, py, qx, qy) end
+          px, py = qx, qy
+          if i == b.n then PR.ln(gc, qx, qy, sx0 + dx * x, sy0 + dy * x) end
+        end
+        PR.pen(gc, "thin")
+        -- ceros (V = 0, M = 0) sobre la barra
+        for i = 1, #b.ceros do
+          local bx, by = sx0 + dx * b.ceros[i], sy0 + dy * b.ceros[i]
+          PR.setc(gc, PR.C.fondo); PR.disco(gc, bx, by, 3)
+          PR.setc(gc, col); PR.anillo(gc, bx, by, 3)
+          PR.disco(gc, bx, by, 1)
+        end
+      end
+    end
+  end
+  -- valores de las barras de cercha: uno por barra, centrado a ~7 px sobre la normal (1/2, luego 1/3 y 2/3)
+  if c.ntruss > 0 then
+    for e = 1, nb do
+      local b = c.bars[e]
+      if b.flat then
+        local rb = res.barras[e]
+        local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
+        local dx, dy = rb.c * S * rb.L, -rb.s * S * rb.L
+        local l = sqrt(dx * dx + dy * dy)
+        if l > 1 then
+          local nx, ny = -dy / l, dx / l
+          if ny > 0 or (ny == 0 and nx < 0) then nx, ny = -nx, -ny end     -- normal hacia arriba en pantalla
+          local cc = b.cero and COL_CERO or (b.val > 0 and COL_TRAC or COL_COMP)
+          for q = 1, 3 do
+            local t = (q == 1) and 0.5 or ((q == 2) and (1 / 3) or (2 / 3))
+            if etiqueta2(gc, b.txt, sx0 + dx * t, sy0 + dy * t, nx, ny, cc) then break end
           end
         end
       end
     end
-    -- contorno
-    PR.setc(gc, col); PR.pen(gc, "medium")
-    local px, py
-    for i = 1, b.n do
-      local x = b.xs[i]
-      local off = b.vs[i] * k
-      local qx, qy = sx0 + dx * x + nx * off, sy0 + dy * x + ny * off
-      if i == 1 then PR.ln(gc, sx0 + dx * x, sy0 + dy * x, qx, qy)
-      else PR.ln(gc, px, py, qx, qy) end
-      px, py = qx, qy
-      if i == b.n then PR.ln(gc, qx, qy, sx0 + dx * x, sy0 + dy * x) end
-    end
-    PR.pen(gc, "thin")
-    -- ceros (V = 0, M = 0) sobre la barra
-    for i = 1, #b.ceros do
-      local bx, by = sx0 + dx * b.ceros[i], sy0 + dy * b.ceros[i]
-      PR.setc(gc, PR.C.fondo); PR.disco(gc, bx, by, 3)
-      PR.setc(gc, col); PR.anillo(gc, bx, by, 3)
-      PR.disco(gc, bx, by, 1)
-    end
   end
-  -- etiquetas de valores
-  for e = 1, nb do
-    local rb, b = res.barras[e], c.bars[e]
-    local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
-    local dx, dy = rb.c * S, -rb.s * S
-    local nx, ny = -rb.s, -rb.c
-    for i = 1, #b.lab do
-      local lb = b.lab[i]
-      local cur = R.cur
-      if not (cur and cur.e == e and abs(cur.x - lb.x) * S < 14) then
+  if c.inv == 0 then return end
+  -- etiquetas de valores: lista ordenada (globales, prioridad 1, prioridad 2), tope de 12
+  local cur = R.cur
+  local puestas = 0
+  for q = 1, c.ncand do
+    if puestas >= MAX_ETQ then break end
+    local lb = c.cand[q]
+    local rb = res.barras[lb.e]
+    local corta = rb.L * S < L_CORTA
+    if lb.g or not (corta and lb.prio ~= 1) then
+      if not (cur and cur.e == lb.e and abs(cur.x - lb.x) * S < 14) then
+        local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
+        local dx, dy = rb.c * S, -rb.s * S
+        local nx, ny = -rb.s, -rb.c
         local off = lb.val * k
         local qx, qy = sx0 + dx * lb.x + nx * off, sy0 + dy * lb.x + ny * off
         local sg = (off >= 0) and 1 or -1
-        PR.setc(gc, col); PR.disco(gc, qx, qy, 2)
-        etiqueta(gc, lb.txt, qx, qy, nx * sg, ny * sg, col)
+        local ok, dup = etiqueta2(gc, lb.txt, qx, qy, nx * sg, ny * sg, col)
+        if ok then
+          PR.setc(gc, col); PR.disco(gc, qx, qy, 2)
+          if not dup then puestas = puestas + 1 end
+        end
       end
     end
   end
@@ -873,7 +1039,8 @@ local function pintar_cursor(gc)
     if modo == "N" or modo == "V" or modo == "M" then
       local cd = cache_diag(modo)
       local val = c[modo] or 0
-      local off = val * cd.kpx * R.kd[modo] * ((modo == "M") and -1 or 1)
+      local off = val * kpx_de(cd) * R.kd[modo] * ((modo == "M") and -1 or 1)
+      if cd.bars[c.e] and cd.bars[c.e].flat then off = 0 end
       local qx, qy = bx - rb.s * off, by - rb.c * off
       qxm, qym = qx, qy
       PR.setc(gc, col); PR.pen(gc, "thin", "dotted")
@@ -959,8 +1126,11 @@ local function preparar_cabecera()
     if modo == "N" or modo == "V" or modo == "M" then
       local c = cache_diag(modo)
       hdr1 = NOMBRE[modo] .. " [" .. unid(modo) .. "]"
-      if c.kpx == 0 then hdr2 = modo .. " = 0 en toda la estructura"
-      else hdr2 = "max " .. num(conv(modo, c.maxabs)) .. " " .. unid(modo) .. " | escala x" .. num(kd, 3) .. " (+/-)" end
+      if c.trivial then
+        hdr2 = (c.solo_cercha and "Cercha: " or "") .. modo .. " = 0 en " .. (c.solo_cercha and "todas las barras" or "toda la estructura")
+      elseif c.maxabs <= 1e-9 then hdr2 = modo .. " = 0 en toda la estructura"
+      elseif c.ntruss > 0 then hdr2 = "Tracción (+) azul · Compresión (−) rojo"
+      else hdr2 = "max " .. num(conv(modo, c.maxabs)) .. " " .. unid(modo) end
     elseif modo == "def" then
       local c = cache_def()
       hdr1 = "Deformada x " .. num(factor_def(), 3) .. (R.def_real and " (real)" or "")
@@ -977,12 +1147,43 @@ local function preparar_cabecera()
   end
 end
 
-local function cabecera(gc)
+local rect_cabecera
+local function cabecera(gc, col)
   local PR = PRm
   local R0 = V0.rect
+  -- fondo blanco bajo los textos: ejes y rejilla no los atraviesan
+  local x0, y0, x1, y1 = rect_cabecera(gc)
+  PR.setc(gc, PR.C.fondo)
+  gc:fillRect(x0, y0, x1 - x0, y1 - y0 - 1)
+  PR.setc(gc, col)
   PR.txt(gc, hdr1, R0.x + 4, R0.y + 1, 9, "l", "b")
   PR.setc(gc, PR.C.etiq)
   PR.txt(gc, hdr2, R0.x + 4, R0.y + 13, 7, "l")
+end
+
+-- Rectangulo de la cabecera (textos de la vista) en las vistas con lienzo: x0, y0, x1, y1
+function rect_cabecera(gc)
+  preparar_cabecera()
+  local R0 = V0.rect
+  local PR = PRm
+  PR.fuente(gc, "b", 9)
+  local w1 = gc:getStringWidth(hdr1)
+  PR.fuente(gc, "r", 7)
+  local w2 = gc:getStringWidth(hdr2)
+  return R0.x + 2, R0.y, R0.x + 8 + max(w1, w2), R0.y + 22
+end
+
+-- Para ui.dibujo: zona de la cabecera (rellena Z[1..4]); false si la vista no tiene cabecera de lienzo
+function R.zona_cabecera(gc, PR, Z)
+  if not (R.modo and R.res) or R.modo == "tabla" or R.modo == "ecs" then return false end
+  PRm = PR
+  Z[1], Z[2], Z[3], Z[4] = rect_cabecera(gc)
+  return true
+end
+
+-- La camara cambio (encuadre): la deformada automatica depende de la escala en pantalla
+function R.camara_cambio()
+  cache.def = nil
 end
 
 -- Selector explicito de deformada: [Real] [Ampliada xN] (arriba a la derecha, clicable)
@@ -1268,25 +1469,26 @@ end
 function R.pintar(gc, V, m, PR)
   if not R.modo then return end
   PRm = PR
-  nlb, nlt = 0, 0
+  nlb, nlt, neq = 0, 0, 0
   R.sel_def.activo = false
   if not R.res then pintar_error(gc); return end
   local modo = R.modo
   if modo ~= "tabla" and modo ~= "ecs" then
     -- zonas reservadas (cabecera y selector): ni etiquetas ni el recuadro de valores las tapan
-    preparar_cabecera()
-    local R0 = V0.rect
-    PR.fuente(gc, "b", 9)
-    local w1 = gc:getStringWidth(hdr1)
-    PR.fuente(gc, "r", 7)
-    local w2 = gc:getStringWidth(hdr2)
-    LB[1], LB[2], LB[3], LB[4] = R0.x + 2, R0.y, R0.x + 8 + max(w1, w2), R0.y + 22
+    LB[1], LB[2], LB[3], LB[4] = rect_cabecera(gc)
     nlb = 4
     if modo == "def" then
       geometria_selector(gc)
       local sd = R.sel_def
       LB[5], LB[6], LB[7], LB[8] = sd.x - 1, sd.y - 1, sd.x + sd.w + 1, sd.y + sd.h + 1
       nlb = 8
+    end
+    -- cada nodo reserva +-5 px: ninguna etiqueta de valor lo tapa
+    local mm = ED.m
+    for i = 1, #mm.nodos do
+      local sx, sy = V0.a_pantalla(mm.nodos[i].x, mm.nodos[i].y)
+      LB[nlb + 1], LB[nlb + 2], LB[nlb + 3], LB[nlb + 4] = floor(sx) - 5, floor(sy) - 5, floor(sx) + 5, floor(sy) + 5
+      nlb = nlb + 4
     end
   end
   if modo == "reac" then
@@ -1302,8 +1504,7 @@ function R.pintar(gc, V, m, PR)
     pintar_ecs(gc)
     return
   end
-  PR.setc(gc, COL[modo] or PR.C.texto)
-  cabecera(gc)
+  cabecera(gc, COL[modo] or PR.C.texto)
   if modo == "def" then pintar_selector(gc) end
   pintar_cursor(gc)
 end

@@ -141,9 +141,34 @@ Restricciones: sin variables globales; módulos devuelven tabla; nada de `io`/`o
 ### 6.2 Pulido de interfaz (v1.0)
 
 - `ui.unidades` (§4.1): `kN-m`, `N-m`, `tf-m`; cfg `unidades` y `def_real` en `on.save`. Menú **Ajustes** (Unidades, Rejilla, Snap, E/A/I); tecla `q` cicla.
-- **Dividir barra** (`ED.dividir_barra(m, e, a)`): clic en el interior de una barra con Nodo/Barra. Primera mitad conserva índice y rótula i; la nueva barra va al final con la rótula j. `P`/`M` pasan a la mitad que los contiene (en el corte exacto: carga nodal del nodo nuevo), `w` se recorta interpolando w1/w2, `T` se copia. Una barra `cercha` pasa a `portico` con extremos articulados (equivalente).
+- **Dividir barra** (`ED.dividir_barra(m, e, a)`): clic en el interior de una barra con Nodo/Barra. Primera mitad conserva índice y rótula i; la nueva barra va al final con la rótula j. `P`/`M` pasan a la mitad que los contiene (en el corte exacto: carga nodal del nodo nuevo), `w` se recorta interpolando w1/w2, `T` se copia. Una barra `cercha` **sin cargas P/M/w** conserva `tipo = "cercha"` en ambas mitades (v1.1): dos cerchas colineales sin una tercera barra en el nodo nuevo son un mecanismo hasta conectarlo, y el clasificador lo avisa; una `cercha` con cargas P/M/w en el vano pasa a `portico` con extremos articulados (equivalente y estable).
 - **Cargas**: `ED.reemplazar_carga_barra`, `ED.borrar_carga_barra`; lista por barra (Agregar / Editar / Borrar) y tipo `T` (`ΔT` junto a la barra). Carga nodal: Editar / Borrar.
 - Etiquetas de carga apiladas sin solape (lista de rectángulos por cuadro); recuadro de valor al apuntar en la esquina más alejada del cursor sin tapar etiquetas; selector Real / Ampliada de la deformada (`R.sel_def`, `R.toggle_def`); ecuaciones con coeficientes escalados a las unidades (x en m) y `N(x) = 0` omitido.
+
+### 6.3 Modo Marco/Cercha, diagramas legibles y encuadre (v1.1)
+
+**Modo de dibujo.** `ED.props.tipo` (`"portico"` = Marco | `"cercha"`) es el tipo de cada barra nueva (ya se serializa en `on.save`).
+- *Selector*: pastillas `Marco | Cercha` en la esquina superior izquierda del lienzo, solo en modelado (`H.selector`, geometría fija); un clic con el touchpad fija el modo (`H.set_modo`). Teclas: `k` alterna; `b` estando ya en Barra alterna (desde otra herramienta solo la elige). El **snap pasa de `k` a `j`**. El estado de la herramienta Barra lo dice: `Cercha: clic nodo A (K cambia)`.
+- *Nuevo*: `Archivo → Nuevo` (`H.nuevo_menu`) y el arranque con modelo vacío (`H.preguntar_inicio`; `on.restore` lo cierra si el documento trae modelo) preguntan `¿Qué vas a dibujar? 1 Viga/Marco 2 Cercha`; ESC conserva el modo actual (en Nuevo igualmente crea el modelo). `H.nuevo(tipo)` es la versión sin diálogo.
+- *Barra seleccionada*: al cambiar el modo con una barra de otro tipo seleccionada, la barra de estado ofrece `ENTER: aplicar también a la barra N` (sin diálogo; caduca con cualquier otra acción).
+- *Conversión*: `ED.convertir_todo(m, tipo)` fija el tipo de todas las barras (y quita rótulas explícitas); `H.convertir_todo` lo hace en **un paso de deshacer** (Ajustes → Convertir todo a cercha / a marco).
+- *Sugerencia*: `ED.parece_cercha(m)` = ≥ 3 barras, todas `portico` sin rótulas ni cargas en barra, sin `mz` nodal, sin apoyo con giro restringido (`rz` o `kr`) y `S.clasificar` de la copia convertida no es `inestable`. Al entrar a resultados con `r` (no al re-resolver) aparece **una sola vez por modelo** (`H.sug_hecho`, se reinicia en Nuevo/Ejemplo/Abrir) el diálogo `Parece una cercha (cargas solo en nudos). ¿Convertir las N barras a cercha?` [Convertir] [Mantener marco].
+
+**Dibujo del modelo.** Barra `cercha` = línea normal + círculo hueco (r 2.5, relleno de fondo) a 6 px de cada extremo si `L_px ≥ 24`. Nudo articulado (todas las barras que concurren son `cercha` o tienen rótula en ese extremo) = anillo r 4 relleno de fondo; nudo rígido = disco negro r 3. La rótula de un pórtico (círculo a 8 px) no se dibuja si el nudo ya es un anillo.
+
+**Diagramas (`ui.resultados`).**
+- *Altura* (R1): `h_max = clamp(0.30·Lmin_px, 6, 0.12·min(w,h))` px, con `Lmin_px` la barra más corta en pantalla (`c.Lmin·V.s`); la caché guarda `inv = 1/maxabs` y `kpx = h_max·inv` se calcula al pintar (sin tablas nuevas).
+- *Cercha en N* (R2): las barras `cercha` con N constante no llevan diagrama: barra gruesa tracción azul / compresión roja / `|N| < 1e-6·max` gris `0`; un valor por barra centrado a ~7 px sobre la normal (se prueba a 1/2, 1/3 y 2/3 y ambos lados). Cabecera: `Tracción (+) azul · Compresión (−) rojo`.
+- *M o V triviales* (R3): si `maxabs(M o V) ≤ 1e-6·max|N|·Lmax` se escribe `Cercha: M = 0 en todas las barras` (o V; `M = 0 en todas las barras` si no son todas cercha) en lugar del diagrama.
+- *Etiquetas* (R4/R5): lista plana precalculada en la caché y ordenada: máximo y mínimo globales, luego prioridad 1 (máx. |val| de cada barra), luego prioridad 2 (los demás extremos), por |val| descendente; se descartan `|val| < 0.02·maxabs` y en barras de `L_px < 40` solo hay prioridad 1. Colocación: solo 2 intentos (lado del diagrama y el opuesto) a 1× de distancia; si chocan se descarta (el valor sigue disponible al apuntar). Tope 12 etiquetas.
+- *Zonas ocupadas* (R6): cada nodo reserva ±5 px, la cabecera y el selector de deformada son zonas reservadas y las etiquetas del modelo (`ui.dibujo`, `PRIM.ocupado`) cuentan como ocupadas. En las vistas N/V/M/Def el modelo se dibuja **sin texto de cargas ni números de nodo**; Reacciones los conserva.
+- Para pruebas: `R.etiquetas()`, `R.hmax_px(campo)`, `R.caja_nodo()`.
+
+**Encuadre.** `V.auto` (true en `vista_inicial` y `encuadrar`; false tras zoom o pan manual; se guarda en `cfg.auto`). Al entrar a resultados se encuadra si `V.auto`, o algún nodo queda fuera del lienzo, o el bbox ocupa < 40 % del ancho útil y del alto útil (`V.conviene_encuadrar`; útil = `rect.w−72`, `rect.h−92`). En modelado con `V.auto` solo se encuadra al **terminar la cadena de barras** (ESC o cambio de herramienta), nunca entre clics. Tope de escala de `V.encuadrar`: 90 px/m (`V.S_FIT`).
+
+**Estado y cabecera.** Textos de herramienta ≤ 34 caracteres. La clasificación tiene prioridad sobre las coordenadas: si no caben juntas se omiten las coordenadas. La cabecera ya no repite `escala x.. (+/-)` (queda en el estado) y las etiquetas de los ejes no se dibujan dentro de la cabecera ni del selector.
+
+**Autor.** `Ayuda → Acerca de` (`H.acerca`): `Estructural v1.1`, `Autor: Adrián Castro Ramírez`, descripción y supuestos; el mismo texto va al pie de la Guía rápida y, en pequeño y gris, en la esquina del lienzo cuando no hay nodos.
 
 ## 7. Verificación
 

@@ -33,6 +33,7 @@ local num = R.num
 pcall(os.execute, "mkdir build\\png 2>nul")
 
 local function key(k) mock.key(k) end
+if D.activo() then key("escape") end   -- selector de tipo del arranque (v1.1)
 local function shown(s) mock.paint(); return (mock.has_text(s)) end
 local function px(x) return math.floor(V.ox + x * V.s + 0.5) end
 local function py(y) return math.floor(V.oy - y * V.s + 0.5) end
@@ -672,6 +673,204 @@ ED.cambio()
 check(shown("ΔT"), "etiqueta ΔT en el lienzo")
 key("r")
 check(sin_error("resolver con T"), "paint con T y resultados")
+H.salir_resultados()
+
+-- =================================================================== v1.1: diagramas legibles
+print("-- v1.1: captura dibujada como marco (M legible)")
+local function captura(tipo)
+  if R.modo then H.salir_resultados() end
+  H.nuevo(tipo)
+  V.fijar_snap(0.5)
+  local m = ED.m
+  for _, p in ipairs({ { 0, 0 }, { 2, 0 }, { 4, 0 }, { 1, 1 }, { 2, 1 }, { 3, 1 } }) do ED.agregar_nodo(m, p[1], p[2]) end
+  for _, b in ipairs({ { 1, 2 }, { 2, 3 }, { 4, 5 }, { 5, 6 }, { 1, 4 }, { 4, 2 }, { 2, 5 }, { 2, 6 }, { 6, 3 } }) do
+    ED.agregar_barra(m, b[1], b[2])
+  end
+  ED.set_apoyo_tipo(m, 1, "articulado"); ED.set_apoyo_tipo(m, 2, "rodilloX")
+  ED.set_carga_nodo(m, 3, 0, -10, 0)
+  ED.cambio()
+  H.encuadrar()
+end
+
+-- rectangulos de etiquetas del ultimo paint: sin solapes entre si ni con cajas de nodo (+-5 px)
+local function etiquetas_limpias(label)
+  mock.paint()
+  local et = R.etiquetas()
+  for i = 1, #et do
+    for j = i + 1, #et do
+      local a, b = et[i], et[j]
+      check(not (a.x0 < b.x1 and a.x1 > b.x0 and a.y0 < b.y1 and a.y1 > b.y0),
+        label .. ": etiquetas encimadas '" .. a.txt .. "' y '" .. b.txt .. "'")
+    end
+  end
+  local mm = ED.m
+  local caja = R.caja_nodo()
+  for i = 1, #mm.nodos do
+    local sx, sy = V.a_pantalla(mm.nodos[i].x, mm.nodos[i].y)
+    sx, sy = math.floor(sx), math.floor(sy)
+    for k = 1, #et do
+      local a = et[k]
+      check(not (a.x0 < sx + caja and a.x1 > sx - caja and a.y0 < sy + caja and a.y1 > sy - caja),
+        label .. ": la etiqueta '" .. a.txt .. "' tapa el nodo " .. i)
+    end
+  end
+  return et
+end
+
+captura("portico")
+key("r")
+check(D.activo() ~= nil, "la captura como marco sugiere convertir a cercha")
+key("2")      -- Mantener marco: se analiza como portico
+eq(R.clasif_texto(), "Hiperestatica g=12", "captura como marco: Hiperestatica g=12")
+key("m")
+do
+  local et = etiquetas_limpias("captura marco M")
+  check(#et <= 12, "<= 12 etiquetas en el diagrama M: " .. #et)
+  check(#et >= 2, "hay etiquetas: " .. #et)
+  local hmax, lminpx = R.hmax_px("M")
+  check(hmax <= 0.30 * lminpx + 1, "altura del diagrama (" .. hmax .. ") <= 0.30*Lmin_px+1 (" .. lminpx .. ")")
+  check(hmax >= 6 and hmax <= 0.12 * math.min(V.rect.w, V.rect.h) + 1e-9, "altura entre 6 px y 12% del lienzo: " .. hmax)
+  -- maximo y minimo globales presentes
+  local res = R.res
+  local vmax, vmin = -1e30, 1e30
+  for e = 1, #res.barras do
+    for _, ex in ipairs(EE.extremos(res, e, "M")) do
+      if ex.val > vmax then vmax = ex.val end
+      if ex.val < vmin then vmin = ex.val end
+    end
+  end
+  local tmax, tmin = num(vmax * U.factor("momento")), num(vmin * U.factor("momento"))
+  local hmx, hmn = false, false
+  for _, e in ipairs(et) do
+    if e.txt == tmax then hmx = true end
+    if e.txt == tmin then hmn = true end
+  end
+  check(hmx or vmax <= 0, "maximo global (" .. tmax .. ") presente")
+  check(hmn or vmin >= 0, "minimo global (" .. tmin .. ") presente")
+  -- ninguna etiqueta bajo el 2 % del maximo
+  local mabs = math.max(math.abs(vmax), math.abs(vmin))
+  for _, e in ipairs(et) do
+    local v = tonumber(e.txt)
+    check(v == nil or math.abs(v) >= 0.02 * mabs * U.factor("momento") - 1e-9, "etiqueta '" .. e.txt .. "' bajo el 2% del maximo")
+  end
+  -- cabecera sin "escala x"
+  check(not shown("escala x"), "la cabecera ya no repite la escala")
+  png("v11_captura_marco_M")
+  for _, v in ipairs({ "v", "n", "d", "r" }) do
+    key(v)
+    local e2 = etiquetas_limpias("captura marco " .. v)
+    check(#e2 <= 14, "etiquetas razonables en vista " .. v .. ": " .. #e2)
+  end
+end
+-- la altura del diagrama crece con el zoom pero sigue acotada por la barra mas corta
+key("m")
+do
+  local h0 = R.hmax_px("M")
+  V.zoom(0.5)
+  local h1, l1 = R.hmax_px("M")
+  check(h1 <= 0.30 * l1 + 1 or h1 == 6, "zoom out: altura <= 0.30*Lmin_px+1")
+  check(h1 <= h0 + 1e-9, "al alejar, el diagrama no crece")
+  H.encuadrar()
+end
+H.salir_resultados()
+
+print("-- v1.1: cercha (N con barras coloreadas, M = 0)")
+ir("Cercha")
+key("n")
+do
+  mock.paint()
+  local res = R.res
+  local et = etiquetas_limpias("cercha N")
+  local mx = 0
+  for e = 1, #res.barras do mx = math.max(mx, math.abs(EE.eval(res, e, res.barras[e].L / 2))) end
+  local pool = {}
+  for i = 1, #et do pool[#pool + 1] = et[i].txt end
+  local esperadas = 0
+  for e = 1, #res.barras do
+    local N = EE.eval(res, e, res.barras[e].L / 2)
+    local txt = (math.abs(N) < 1e-6 * mx) and "0" or num(N * U.factor("fuerza"))
+    local found
+    for k = 1, #pool do if pool[k] == txt then found = k; break end end
+    check(found ~= nil, "cercha N: etiqueta '" .. txt .. "' de la barra " .. e)
+    if found then
+      table.remove(pool, found)
+      if txt ~= "0" then
+        eq(txt:sub(1, 1) == "-", N < 0, "cercha N: signo de la barra " .. e .. " (tracción +, compresión -)")
+      end
+    end
+    esperadas = esperadas + 1
+  end
+  eq(#et, esperadas, "cercha N: una etiqueta por barra")
+  check(mock.has_text("Tracción (+) azul"), "cabecera de N: tracción azul / compresión roja")
+  check(not shown("max "), "N de cercha: sin 'max' en la cabecera")
+  png("v11_cercha_ejemplo_N")
+  -- barras coloreadas: hay lineas gruesas azules y rojas dibujadas
+  local azul, rojo = false, false
+  local pen_gruesa = false
+  for _, op in ipairs(mock.last_ops) do
+    if op[1] == "setPen" and op[2] == "thick" then pen_gruesa = true end
+    if op[1] == "drawLine" and pen_gruesa then
+      local c = op.color
+      if c[1] == 20 and c[2] == 70 and c[3] == 225 then azul = true end
+      if c[1] == 215 and c[2] == 30 and c[3] == 30 then rojo = true end
+    end
+  end
+  check(azul and rojo, "barras gruesas azul (traccion) y roja (compresion)")
+end
+key("m")
+check(shown("M = 0"), "cercha: vista M muestra 'M = 0'")
+check(shown("Cercha: M = 0 en todas las barras"), "texto exacto de la vista M")
+key("v")
+check(shown("V = 0"), "cercha: vista V muestra 'V = 0'")
+do
+  -- sin diagrama: ninguna etiqueta de valor ni polilinea de color M
+  local et = R.etiquetas()
+  eq(#et, 0, "M = 0: sin etiquetas")
+end
+H.salir_resultados()
+-- basura por paint: cercha en N (barras coloreadas) y la captura como marco en M
+ir("Cercha"); key("n")
+do
+  local kb = basura_paint()
+  print(string.format("   basura por paint en resultados (cercha, N): %.2f KB", kb))
+  check(kb < 3, "paint de N en cercha genera poca basura: " .. kb)
+end
+H.salir_resultados()
+captura("portico"); key("r"); if D.activo() then key("2") end; key("m")
+do
+  local kb = basura_paint()
+  print(string.format("   basura por paint en resultados (captura marco, M): %.2f KB", kb))
+  check(kb < 3, "paint de M en la captura genera poca basura: " .. kb)
+end
+H.salir_resultados()
+-- una cercha con carga en una barra SI tiene M (el texto desaparece)
+ir("Cercha")
+H.salir_resultados()
+ED.agregar_carga_barra(ED.m, 1, { t = "w", a = 0, b = 3, w1 = -8, w2 = -8, dir = "GY" })
+ED.cambio()
+key("r"); key("m")
+check(not shown("M = 0 en"), "con carga en la barra la vista M ya no dice M = 0")
+H.salir_resultados()
+
+print("-- v1.1: viga y portal: etiquetas sin encimarse")
+for _, ej in ipairs({ "Viga apoyada", "Voladizo", "Viga continua", "Portal" }) do
+  ir(ej)
+  for _, v in ipairs({ "n", "v", "m" }) do
+    key(v)
+    local et = etiquetas_limpias(ej .. " " .. v)
+    check(#et <= 12, ej .. " " .. v .. ": <= 12 etiquetas (" .. #et .. ")")
+  end
+  H.salir_resultados()
+end
+-- cargas del modelo: en N/V/M/Def sin texto ni numeros de nodo; en Reacciones si
+ir("Portal"); key("m")
+mock.paint()
+check(not mock.has_text("20 kN"), "vista M: la carga nodal no lleva texto")
+check(not mock.has_text("10 kN/m"), "vista M: la distribuida no lleva texto")
+key("d"); mock.paint()
+check(not mock.has_text("20 kN"), "vista Def: sin texto de cargas")
+key("r"); mock.paint()
+check(mock.has_text("20 kN"), "vista Reacciones: conserva las etiquetas de carga")
 H.salir_resultados()
 
 -- =================================================================== robustez

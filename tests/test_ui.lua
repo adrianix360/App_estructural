@@ -38,6 +38,7 @@ local function nuevo()
   H.nuevo()
   H.set_tool("barra")
   V.vista_inicial()
+  V.auto = false          -- camara fija: las pruebas hacen clic en coordenadas de pantalla calculadas
   V.fijar_snap(0.5)
 end
 local function dentro(label)
@@ -70,12 +71,18 @@ do
   local titulos = {}
   for _, m in ipairs(mock.toolpalette_menu) do titulos[#titulos + 1] = m[1] end
   eq(table.concat(titulos, ","), "Archivo,Herramientas,Vista,Ajustes,Ayuda", "menus")
-  local n_items = 0
-  for _, m in ipairs(mock.toolpalette_menu) do n_items = n_items + #m - 1 end
-  check(n_items <= 30 and #mock.toolpalette_menu <= 15, "limites de toolpalette (<=30 items)")
+  local maxi = 0
+  for _, m in ipairs(mock.toolpalette_menu) do maxi = math.max(maxi, #m - 1) end
+  check(maxi <= 30 and #mock.toolpalette_menu <= 15, "limites de toolpalette (<=30 items por menu, <=15 menus)")
 end
+-- v1.1: con el modelo vacio la app pregunta que se va a dibujar; ESC conserva el modo actual
+check(D.activo() ~= nil and shown("Qué vas a dibujar"), "arranque vacio: selector de tipo")
+eq(ED.props.tipo, "portico", "modo inicial: marco")
+key("escape")
+check(D.activo() == nil, "ESC cierra el selector de arranque")
+eq(ED.props.tipo, "portico", "ESC mantiene el modo actual")
 check(shown("Modelo vacio"), "pantalla de bienvenida")
-check(shown("Barra - Clic en el nodo A"), "barra de estado con instruccion")
+check(shown("Marco: clic nodo A"), "barra de estado con instruccion")
 dentro("arranque")
 png("01_vacio")
 
@@ -345,7 +352,7 @@ dentro("encuadrar")
 local g = V.rejilla
 key("g"); check(V.rejilla ~= g, "g alterna rejilla"); key("g")
 local si = V.snap_i
-key("k"); check(V.snap_i ~= si, "k cicla el snap")
+key("j"); check(V.snap_i ~= si, "j cicla el snap")
 V.fijar_snap(0.5)
 
 -- ejemplos
@@ -656,24 +663,37 @@ do
   ED.agregar_carga_barra(mi, 1, { t = "w", a = 1, b = 4, w1 = 3, w2 = 9, dir = "L" })
   comparar(mi, 1, 2.2, "inclinada, corte en tramo")
   comparar(mi, 1, 2, "inclinada, corte justo en 4 puntuales (P global x/y, L, LX)")
-  -- cercha: la barra dividida pasa a portico con extremos articulados y los desplazamientos no cambian
+  -- cercha SIN cargas P/M/w en el vano: ambas mitades siguen siendo cercha; el nodo colineal sin una
+  -- tercera barra es un mecanismo hasta conectarlo (el clasificador lo avisa)
   local mc = ED.ejemplo("Cercha")
   local m2 = ED.copiar(mc)
   local ok2 = ED.dividir_barra(m2, 1, 1.5)
   check(ok2 ~= nil, "cercha: divide la barra 1")
-  eq(m2.barras[1].tipo, "portico", "cercha dividida: primera mitad portico")
-  check(m2.barras[1].rot_i and m2.barras[#m2.barras].rot_j and not m2.barras[1].rot_j, "cercha dividida: extremos articulados")
-  local rc0, rc1 = S.resolver(mc), S.resolver(m2)
-  check(rc0 ~= nil and rc1 ~= nil, "cercha dividida se resuelve")
+  eq(m2.barras[1].tipo, "cercha", "cercha dividida sin cargas: primera mitad cercha")
+  eq(m2.barras[#m2.barras].tipo, "cercha", "cercha dividida sin cargas: segunda mitad cercha")
+  eq(S.clasificar(m2).tipo, "inestable", "dos cerchas colineales sin tercera barra: inestable")
+  eq(S.clasificar(mc).tipo, "isostatica", "la cercha original es isostatica")
+  local ec = ED.agregar_barra(m2, ok2, 4, ED.PROPS_DEFECTO)   -- conectar el nodo nuevo al nodo 4
+  m2.barras[ec].tipo = "cercha"
+  check(S.clasificar(m2).tipo ~= "inestable", "conectado con una tercera barra deja de ser inestable")
+  -- cercha CON carga puntual en el vano: portico con extremos articulados (equivalente), mismos desplazamientos
+  local mc2 = ED.ejemplo("Cercha")
+  ED.agregar_carga_barra(mc2, 1, { t = "P", a = 1, p = -5, dir = "GY" })
+  local m2b = ED.copiar(mc2)
+  check(ED.dividir_barra(m2b, 1, 1.5) ~= nil, "cercha cargada: divide la barra 1")
+  eq(m2b.barras[1].tipo, "portico", "cercha cargada dividida: primera mitad portico")
+  check(m2b.barras[1].rot_i and m2b.barras[#m2b.barras].rot_j and not m2b.barras[1].rot_j, "cercha cargada dividida: extremos articulados")
+  local rc0, rc1 = S.resolver(mc2), S.resolver(m2b)
+  check(rc0 ~= nil and rc1 ~= nil, "cercha cargada dividida se resuelve")
   if rc0 and rc1 then
     local peor = 0
-    for i = 1, #mc.nodos do
+    for i = 1, #mc2.nodos do
       peor = math.max(peor, math.abs(rc0.d[i].ux - rc1.d[i].ux), math.abs(rc0.d[i].uy - rc1.d[i].uy))
     end
-    check(peor < 1e-9, "cercha dividida: mismos desplazamientos nodales (" .. peor .. ")")
+    check(peor < 1e-9, "cercha cargada dividida: mismos desplazamientos nodales (" .. peor .. ")")
     local N0 = EE.eval(rc0, 1, 0.5)
     local N1 = EE.eval(rc1, 1, 0.5)
-    near(N1, N0, "cercha dividida: mismo axial", 1e-7)
+    near(N1, N0, "cercha cargada dividida: mismo axial", 1e-7)
   end
   -- errores
   local m3 = ED.copiar(mm)
@@ -954,7 +974,7 @@ V.encuadrar(modelo())
 H.set_tool("nodo")
 mock.move(px(3), py(0) + 1)
 clic(3, 0)
-check(shown("dividida"), "mensaje de division")
+check(shown("divide la barra"), "mensaje de division")
 mock.move(px(1.5), py(0))
 dentro("division de barra")
 png("pol_dividir_barra")
@@ -996,12 +1016,345 @@ do
     n = n + #mn - 1
     check(#mn - 1 <= 30, "menu '" .. mn[1] .. "' con <= 30 items")
   end
-  check(n <= 30 and #mock.toolpalette_menu <= 15, "toolpalette total " .. n .. " items")
+  check(#mock.toolpalette_menu <= 15, "toolpalette: " .. #mock.toolpalette_menu .. " menus (<= 15)")
   local hay_unid = false
   for _, mn in ipairs(mock.toolpalette_menu) do
     for i = 2, #mn do if mn[i][1]:find("Unidades") then hay_unid = true end end
   end
   check(hay_unid, "Unidades en el menu")
+end
+
+-- =================================================================== v1.1: modo Marco / Cercha
+print("-- v1.1: selector Marco | Cercha")
+sin_resultados()
+-- cercha de la captura del usuario: dibujada con la herramienta Barra y clics
+local function dibujar_captura(modo)
+  nuevo()
+  ED.set_tipo(modo)
+  V.auto = true     -- como el usuario: vista automatica (se encuadra al terminar cada cadena)
+  clic(0, 0); clic(2, 0); clic(4, 0); key("escape")
+  clic(1, 1); clic(2, 1); clic(3, 1); key("escape")
+  clic(0, 0); clic(1, 1); key("escape")
+  clic(1, 1); clic(2, 0); key("escape")
+  clic(2, 0); clic(2, 1); key("escape")
+  clic(2, 0); clic(3, 1); key("escape")
+  clic(3, 1); clic(4, 0); key("escape")
+  local mm = modelo()
+  ED.set_apoyo_tipo(mm, 1, "articulado"); ED.set_apoyo_tipo(mm, 2, "rodilloX")
+  ED.set_carga_nodo(mm, 3, 0, -10, 0)
+  ED.cambio()
+end
+nuevo(); ED.set_tipo("portico"); H.sel = nil
+check(shown("Marco") and shown("Cercha"), "selector: pastillas Marco y Cercha visibles en modelado")
+do
+  local sl = H.selector
+  check(sl.x >= 0 and sl.y >= V.rect.y and sl.x + sl.w <= 120, "selector en la esquina superior izquierda del lienzo")
+  mock.paint()
+  local hallado = false
+  for _, t in ipairs(mock.screen_text()) do
+    if t.text == "Cercha" and t.y >= sl.y and t.y < sl.y + sl.h then
+      hallado = t.x >= sl.xc and t.x + t.w <= sl.xc + sl.wc and t.y + t.h <= sl.y + sl.h + 2
+    end
+  end
+  check(hallado, "texto Cercha dentro de su pastilla")
+  -- clic con el touchpad en la pastilla Cercha / Marco, sin crear nodos
+  mock.move(sl.xc + 8, sl.y + 6); mock.click(sl.xc + 8, sl.y + 6)
+  eq(ED.props.tipo, "cercha", "clic en la pastilla Cercha fija el modo")
+  eq(#modelo().nodos, 0, "el clic en el selector no crea nodos")
+  check(shown("Modo Cercha"), "aviso del cambio de modo")
+  eq(H.texto_estado(), "Cercha: clic nodo A (K cambia)", "estado de Barra dice Cercha")
+  mock.move(sl.xm + 8, sl.y + 6); mock.click(sl.xm + 8, sl.y + 6)
+  eq(ED.props.tipo, "portico", "clic en la pastilla Marco fija el modo")
+  eq(H.texto_estado(), "Marco: clic nodo A (K cambia)", "estado de Barra dice Marco")
+  png("v11_selector_marco")
+end
+-- teclas: k alterna; b estando ya en Barra alterna
+H.set_tool("barra"); ED.set_tipo("portico")
+key("k"); eq(ED.props.tipo, "cercha", "k alterna a cercha")
+key("k"); eq(ED.props.tipo, "portico", "k alterna a marco")
+key("b"); eq(ED.props.tipo, "cercha", "b estando en Barra alterna (b b)")
+key("b"); eq(ED.props.tipo, "portico", "b b b vuelve")
+H.set_tool("sel"); key("b"); eq(H.tool, "barra", "b desde otra herramienta solo elige Barra")
+eq(ED.props.tipo, "portico", "...sin alternar el modo")
+-- cada barra nueva nace con el modo
+ED.set_tipo("cercha"); clic(0, 0); clic(3, 0); key("escape")
+eq(modelo().barras[1].tipo, "cercha", "barra nueva en modo Cercha es cercha")
+ED.set_tipo("portico"); clic(3, 0); clic(3, 3); key("escape")
+eq(modelo().barras[2].tipo, "portico", "barra nueva en modo Marco es portico")
+-- ENTER aplica el modo tambien a la barra seleccionada
+H.set_tool("sel"); clic(1.5, 0)
+check(H.sel and H.sel.t == "barra" and H.sel.i == 1, "barra 1 seleccionada")
+key("k")   -- marco -> cercha, la barra 1 ya es cercha: no hay oferta
+check(not shown("ENTER: aplicar"), "sin oferta si la barra ya tiene ese tipo")
+key("k")   -- cercha -> marco: la barra 1 (cercha) difiere
+check(shown("ENTER: aplicar"), "oferta ENTER: aplicar tambien a la barra seleccionada")
+check(D.activo() == nil, "sin dialogo bloqueante")
+key("enter")
+eq(modelo().barras[1].tipo, "portico", "ENTER aplica el tipo a la barra seleccionada")
+H.deshacer(); eq(modelo().barras[1].tipo, "cercha", "U restaura el tipo de la barra")
+-- la oferta caduca con cualquier otra accion
+key("k"); key("k"); H.sel = { t = "barra", i = 1 }; key("k")
+mock.move(5, 100); key("k"); key("k")
+
+print("-- v1.1: cercha de la captura en modo Cercha")
+sin_resultados()
+dibujar_captura("cercha")
+do
+  local mm = modelo()
+  eq(#mm.nodos, 6, "captura: 6 nodos"); eq(#mm.barras, 9, "captura: 9 barras")
+  local todas = true
+  for _, b in ipairs(mm.barras) do if b.tipo ~= "cercha" then todas = false end end
+  check(todas, "captura: todas las barras son cercha")
+  check(D.activo() == nil, "dibujar la cercha no abre dialogos")
+  eq(S.clasificar(mm).tipo, "isostatica", "captura en modo Cercha: isostatica")
+  H.set_tool("sel"); H.sel = nil
+  png("v11_cercha_modelado")
+  check(shown("Isostatica"), "barra de estado: Isostatica")
+  key("r")
+  check(D.activo() == nil, "resolver la cercha no abre dialogos (ya es cercha)")
+  check(shown("Isostatica"), "resultados: Isostatica")
+  -- encuadre al entrar a resultados: el modelo ocupa >= 60 % del ancho util y queda centrado
+  local x0, y0, x1, y1 = V.bbox_pantalla(mm)
+  local aw = V.util()
+  check((x1 - x0) >= 0.6 * aw, "tras r el modelo ocupa >= 60% del ancho util: " .. (x1 - x0) .. " de " .. aw)
+  near((x0 + x1) / 2, V.rect.x + V.rect.w / 2, "modelo centrado en x", 2)
+  near((y0 + y1) / 2, V.rect.y + V.rect.h / 2, "modelo centrado en y", 2)
+  key("n"); png("v11_cercha_N")
+  key("m"); png("v11_cercha_M")
+  H.salir_resultados()
+end
+
+print("-- v1.1: encuadre automatico y manual")
+sin_resultados()
+nuevo(); V.auto = true
+ED.set_tipo("cercha")
+clic(0, 0); clic(4, 0)       -- cadena en curso: la camara no se mueve entre clics
+local s_antes, ox_antes = V.s, V.ox
+clic(2, 2)
+eq(V.s, s_antes, "entre clics de una cadena no cambia la escala"); eq(V.ox, ox_antes, "... ni el origen")
+clic(0, 0)
+key("escape")
+check(V.s ~= s_antes, "al terminar la cadena (ESC) se encuadra con vista automatica")
+check(V.auto, "el encuadre deja V.auto = true")
+-- zoom manual: V.auto = false y r no reencuadra mientras el modelo se vea
+ED.set_apoyo_tipo(modelo(), 1, "articulado"); ED.set_apoyo_tipo(modelo(), 2, "rodilloX")
+ED.set_carga_nodo(modelo(), 3, 0, -10, 0); ED.cambio()
+H.zoom(1 / 1.4)
+check(not V.auto, "zoom manual apaga V.auto")
+local s_man = V.s
+do
+  local x0, y0, x1, y1 = V.bbox_pantalla(modelo())
+  check(x0 >= V.rect.x + 4 and x1 <= V.rect.x + V.rect.w - 4 and (x1 - x0) >= 0.4 * V.util(), "el modelo sigue visible y > 40%")
+end
+key("r")
+check(Res.modo ~= nil, "resuelve")
+eq(V.s, s_man, "tras zoom manual, r no cambia la escala")
+H.salir_resultados()
+V.pan(10, 0); check(not V.auto, "pan manual apaga V.auto")
+-- modelo diminuto o fuera de vista: r si encuadra aunque la vista sea manual
+V.zoom(0.1, V.rect.w / 2, V.rect.h / 2)
+key("r")
+do
+  local a, b, c2, d = V.bbox_pantalla(modelo())
+  check((c2 - a) >= 0.6 * V.util(), "modelo diminuto: r encuadra")
+end
+H.salir_resultados()
+V.pan(5000, 0)
+key("r")
+do
+  local a, b, c2, d = V.bbox_pantalla(modelo())
+  check(a >= V.rect.x and c2 <= V.rect.x + V.rect.w, "modelo fuera de vista: r lo encuadra")
+end
+H.salir_resultados()
+
+print("-- v1.1: Archivo > Nuevo pregunta el tipo")
+sin_resultados()
+ED.set_tipo("portico")
+H.nuevo_menu()
+check(D.activo() ~= nil and shown("Qué vas a dibujar"), "Nuevo pregunta que vas a dibujar")
+check(shown("Viga / Marco") and shown("Cercha"), "opciones Viga / Marco y Cercha")
+png("v11_nuevo_pregunta")
+key("2")
+eq(ED.props.tipo, "cercha", "elegir 2 fija el modo Cercha")
+eq(#modelo().nodos, 0, "y el modelo es nuevo")
+H.nuevo_menu(); key("escape")
+eq(ED.props.tipo, "cercha", "ESC mantiene el modo actual")
+check(D.activo() == nil, "ESC cierra el selector")
+H.nuevo_menu(); key("1"); eq(ED.props.tipo, "portico", "elegir 1 fija Viga / Marco")
+-- el item del menu Archivo > Nuevo abre el selector
+do
+  local f
+  for _, mn in ipairs(mock.toolpalette_menu) do
+    if mn[1] == "Archivo" then for i = 2, #mn do if mn[i][1] == "Nuevo" then f = mn[i][2] end end end
+  end
+  check(f ~= nil, "menu Archivo > Nuevo existe")
+  f(); check(D.activo() ~= nil, "el item Nuevo abre el selector de tipo"); key("escape")
+end
+
+print("-- v1.1: convertir todo, parece_cercha y sugerencia")
+sin_resultados()
+dibujar_captura("portico")
+do
+  local mm = modelo()
+  local todas = true
+  for _, b in ipairs(mm.barras) do if b.tipo ~= "portico" then todas = false end end
+  check(todas, "captura como marco: todas porticos")
+  eq(S.clasificar(mm).tipo, "hiperestatica", "captura como marco: hiperestatica")
+  check(ED.parece_cercha(mm), "parece_cercha: captura dibujada como marco")
+  -- negativos
+  local c1 = ED.copiar(mm); ED.agregar_carga_barra(c1, 1, { t = "w", a = 0, b = 2, w1 = -5, w2 = -5, dir = "GY" })
+  check(not ED.parece_cercha(c1), "parece_cercha: falso con carga en barra")
+  local c2 = ED.copiar(mm); ED.set_carga_nodo(c2, 3, 0, -10, 3)
+  check(not ED.parece_cercha(c2), "parece_cercha: falso con momento nodal")
+  local c3 = ED.copiar(mm); ED.set_apoyo_tipo(c3, 1, "empotrado")
+  check(not ED.parece_cercha(c3), "parece_cercha: falso con empotramiento")
+  local c4 = ED.copiar(mm); c4.barras[1].rot_i = true
+  check(not ED.parece_cercha(c4), "parece_cercha: falso con rotulas")
+  local c5 = ED.copiar(mm); c5.barras[2].tipo = "cercha"
+  check(not ED.parece_cercha(c5), "parece_cercha: falso si ya hay barras cercha")
+  local c6 = ED.copiar(mm); while #c6.barras > 2 do table.remove(c6.barras) end
+  check(not ED.parece_cercha(c6), "parece_cercha: falso con < 3 barras")
+  local c7 = ED.ejemplo("Portal")
+  check(not ED.parece_cercha(c7), "parece_cercha: falso en el portal")
+  local c8 = ED.copiar(mm); ED.set_apoyo_tipo(c8, 2, "libre"); ED.set_apoyo_tipo(c8, 1, "libre")
+  check(not ED.parece_cercha(c8), "parece_cercha: falso si la copia convertida seria inestable")
+  -- sugerencia al resolver: una sola vez por modelo
+  H.set_tool("sel"); H.sel = nil
+  key("r")
+  check(D.activo() ~= nil and shown("Parece una cercha"), "al resolver aparece la sugerencia")
+  check(shown("Convertir") and shown("Mantener marco"), "con los botones Convertir y Mantener marco")
+  png("v11_sugerencia_cercha")
+  key("2")
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "portico", "Mantener marco no cambia nada") end
+  H.salir_resultados(); key("r")
+  check(D.activo() == nil, "la sugerencia no se repite para el mismo modelo")
+  H.salir_resultados()
+  -- convertir desde la sugerencia: un solo paso de deshacer
+  H.nuevo(); dibujar_captura("portico")
+  key("r")
+  check(D.activo() ~= nil, "modelo nuevo: la sugerencia vuelve a aparecer")
+  key("1")
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "cercha", "Convertir pasa todas a cercha") end
+  eq(Res.clasif_texto(), "Isostatica", "resultado tras convertir: isostatica")
+  H.salir_resultados()
+  H.deshacer()
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "portico", "un solo U restaura todas las barras") end
+  -- Ajustes: convertir todo
+  H.convertir_todo("cercha")
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "cercha", "convertir todo a cercha") end
+  eq(ED.props.tipo, "cercha", "y el modo de dibujo pasa a Cercha")
+  H.convertir_todo("portico")
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "portico", "convertir todo a marco") end
+  H.deshacer(); H.deshacer()
+  for _, b in ipairs(modelo().barras) do eq(b.tipo, "portico", "dos U vuelven al marco original") end
+  local ajustes
+  for _, mn in ipairs(mock.toolpalette_menu) do if mn[1] == "Ajustes" then ajustes = mn end end
+  local hay_c, hay_m = false, false
+  for i = 2, #ajustes do
+    if ajustes[i][1] == "Convertir todo a cercha" then hay_c = true end
+    if ajustes[i][1] == "Convertir todo a marco" then hay_m = true end
+  end
+  check(hay_c and hay_m, "menu Ajustes: convertir todo a cercha / marco")
+end
+
+print("-- v1.1: textos de estado")
+sin_resultados()
+do
+  local function revisar(label)
+    mock.paint()
+    local ops = mock.last_ops
+    for _, t in ipairs(mock.screen_text(ops)) do
+      if t.y >= mock.H - 16 then
+        check(t.text:sub(-2) ~= "..", label .. ": texto de estado recortado '" .. t.text .. "'")
+        check(t.x >= 0 and t.x + t.w <= mock.W, label .. ": texto de estado fuera de pantalla '" .. t.text .. "'")
+      end
+    end
+  end
+  H.nuevo(); V.auto = false
+  mock.move(150, 100)
+  for _, tool in ipairs({ "sel", "nodo", "barra", "apoyo", "carga" }) do
+    H.set_tool(tool); revisar("herramienta " .. tool)
+    local est = H.texto_estado()
+    check(#est <= 34, "texto de herramienta <= 34 caracteres: '" .. est .. "' (" .. #est .. ")")
+  end
+  H.set_tool("barra"); clic(0, 0); revisar("barra: nodo B")
+  check(#H.texto_estado() <= 34, "estado barra B <= 34: " .. H.texto_estado())
+  key("escape")
+  dibujar_captura("portico"); H.set_tool("sel"); H.sel = nil
+  mock.move(150, 100); revisar("captura marco")
+  H.sel = { t = "barra", i = 3 }; revisar("barra seleccionada")
+  check(#H.texto_estado() <= 34, "estado barra sel <= 34: " .. H.texto_estado())
+  H.sel = { t = "nodo", i = 6 }; revisar("nodo seleccionado")
+  check(#H.texto_estado() <= 34, "estado nodo sel <= 34: " .. H.texto_estado())
+  -- la clasificacion siempre se ve; las coordenadas se omiten si no caben
+  check(shown("Hiperestatica"), "clasificacion visible en el estado")
+  H.sel = nil
+  for _, ej in ipairs(ED.ejemplos) do
+    H.ejemplo(ej); mock.move(150, 100); revisar("ejemplo " .. ej)
+    key("r"); if D.activo() then key("escape") end
+    for _, v in ipairs({ "r", "n", "v", "m", "d", "t", "e" }) do key(v); revisar("resultados " .. ej .. " " .. v) end
+    H.salir_resultados()
+  end
+  -- mensajes tipicos
+  H.nuevo(); V.auto = false; H.set_tool("barra")
+  clic(0, 0); clic(3, 0); revisar("mensaje barra creada")
+  key("escape"); revisar("mensaje cadena terminada")
+  V.vista_inicial(); V.auto = false
+  H.set_tool("nodo"); clic(1.5, 0); revisar("mensaje dividir")
+  H.deshacer(); revisar("mensaje deshecho")
+  H.set_modo("cercha"); revisar("mensaje modo")
+  H.set_tool("sel"); clic(1.5, 0); H.set_modo("portico"); revisar("mensaje modo con barra")
+  H.convertir_todo("cercha"); revisar("mensaje convertir")
+end
+
+print("-- v1.1: Acerca de, autor y version")
+sin_resultados()
+do
+  local ayuda
+  for _, mn in ipairs(mock.toolpalette_menu) do if mn[1] == "Ayuda" then ayuda = mn end end
+  local f
+  for i = 2, #ayuda do if ayuda[i][1] == "Acerca de" then f = ayuda[i][2] end end
+  check(f ~= nil, "menu Ayuda > Acerca de")
+  f()
+  check(D.activo() ~= nil, "Acerca de abre una pantalla")
+  check(shown("Estructural v1.1"), "Acerca de: version v1.1")
+  check(shown("Autor: Adrián Castro Ramírez"), "Acerca de: autor con acentos")
+  check(shown("Euler-Bernoulli"), "Acerca de: supuestos")
+  dentro("acerca de")
+  png("v11_acerca_de")
+  key("escape")
+  H.ayuda()
+  for _ = 1, 60 do key("down") end
+  check(shown("Estructural v1.1 · Adrián Castro Ramírez"), "Guia rapida: autor al pie")
+  key("escape")
+  H.nuevo()
+  mock.paint()
+  check(shown("Estructural v1.1 · Adrián Castro Ramírez"), "pantalla de inicio vacia muestra autor y version")
+  dentro("inicio vacio")
+  png("v11_inicio_vacio")
+  local ok, t = mock.has_text("Adrián Castro Ramírez")
+  check(ok and t.size == 7, "autor en 7 pt")
+  for _, mn in ipairs(mock.toolpalette_menu) do
+    check(#mn - 1 <= 30, "menu '" .. mn[1] .. "' <= 30 items (" .. (#mn - 1) .. ")")
+  end
+end
+
+-- basura por paint con el selector y las cerchas dibujadas (limite igual que antes)
+do
+  dibujar_captura("cercha"); H.set_tool("sel"); H.sel = nil
+  local gcc = env.collectgarbage
+  local noop, w30, h12 = function() end, function() return 30 end, function() return 12 end
+  local nulo = setmetatable({}, { __index = function(_, k)
+    if k == "getStringWidth" then return w30 end
+    if k == "getStringHeight" then return h12 end
+    return noop
+  end })
+  env.on.paint(nulo); gcc("collect")
+  local m0 = gcc("count")
+  for i = 1, 100 do env.on.paint(nulo) end
+  local por_paint = (gcc("count") - m0) / 100
+  print(string.format("   basura por on.paint (captura cercha, modelado): %.2f KB", por_paint))
+  check(por_paint < 3, "on.paint (modelado, cercha con selector) genera poca basura: " .. por_paint .. " KB")
 end
 
 -- PNG adicionales: estados representativos

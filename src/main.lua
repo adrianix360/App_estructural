@@ -1,6 +1,7 @@
 platform.apiLevel = '2.4'
 
--- main.lua - Punto de entrada de Estructural 2D (TI-Nspire CX II CAS).
+-- main.lua - Punto de entrada de Estructural 2D v1.1 (TI-Nspire CX II CAS).
+-- Autor: Adrián Castro Ramírez.
 -- Solo cablea los eventos on.* hacia ui.herramientas / ui.dialogo, dibuja con ui.dibujo y
 -- guarda/restaura el documento. La logica vive en src/ui/*.lua.
 local ED = require("ui.modelo_ed")
@@ -36,7 +37,7 @@ local function registrar_menu()
     local nom = ED.ejemplos[i]
     ej[#ej + 1] = { "Ejemplo: " .. nom, function() H.ejemplo(nom) end }
   end
-  local archivo = { "Archivo", { "Nuevo", H.nuevo } }
+  local archivo = { "Archivo", { "Nuevo", H.nuevo_menu } }
   for i = 1, #ej do archivo[#archivo + 1] = ej[i] end
   archivo[#archivo + 1] = { "Guardar como...", H.guardar_como }
   archivo[#archivo + 1] = { "Abrir...", H.abrir }
@@ -47,6 +48,7 @@ local function registrar_menu()
       { "Seleccionar / mover (S)", function() H.set_tool("sel") end },
       { "Nodo (N)", function() H.set_tool("nodo") end },
       { "Barra (B)", function() H.set_tool("barra") end },
+      { "Marco / Cercha (K)", H.alternar_modo },
       { "Apoyo (A)", function() H.set_tool("apoyo") end },
       { "Carga (C)", function() H.set_tool("carga") end },
       { "Resolver (R)", H.resolver },
@@ -61,11 +63,14 @@ local function registrar_menu()
     { "Ajustes",
       { "Unidades... (Q)", H.menu_unidades },
       { "Rejilla (G)", H.toggle_rejilla },
-      { "Snap... (K)", H.menu_snap },
-      { "E, A, I y tipo de barra (P)", H.props_globales } },
+      { "Snap... (J)", H.menu_snap },
+      { "E, A, I y tipo de barra (P)", H.props_globales },
+      { "Convertir todo a cercha", function() H.convertir_todo("cercha") end },
+      { "Convertir todo a marco", function() H.convertir_todo("portico") end } },
     { "Ayuda",
       { "Guia rapida (H)", H.ayuda },
-      { "Leyenda de signos (L)", H.leyenda } },
+      { "Leyenda de signos (L)", H.leyenda },
+      { "Acerca de", H.acerca } },
   })
 end
 
@@ -74,6 +79,7 @@ function on.construction()
   aplicar_tamano(w, h)
   V.encuadrar(ED.m)
   registrar_menu()
+  if #ED.m.nodos == 0 then H.preguntar_inicio() end
   redraw()
 end
 
@@ -149,14 +155,16 @@ end
 function on.save()
   local t = ED.exportar()
   t.cfg = { rejilla = V.rejilla, snap_i = V.snap_i, tool = H.tool, s = V.s, ox = V.ox, oy = V.oy,
-            unidades = U.actual, def_real = Res.def_real and true or false }
+            unidades = U.actual, def_real = Res.def_real and true or false, auto = V.auto and true or false }
   return t
 end
 
 function on.restore(t)
   if type(t) ~= "table" then return end
   ED.importar(t)
-  H.sel, H.barra_a = nil, nil
+  H.sel, H.barra_a, H.cadena_sucia, H.pend, H.sug_hecho = nil, nil, false, nil, false
+  -- el selector de arranque (modelo vacio) sobra si el documento trae un modelo
+  if H.dialogo_inicio and D.activo() == H.dialogo_inicio and #ED.m.nodos > 0 then D.cerrar() end
   local c = t.cfg
   if type(c) == "table" then
     if type(c.unidades) == "string" then U.set(c.unidades) end
@@ -169,6 +177,7 @@ function on.restore(t)
     end
     if type(c.s) == "number" and type(c.ox) == "number" and type(c.oy) == "number" and c.s >= V.S_MIN and c.s <= V.S_MAX then
       V.s, V.ox, V.oy = c.s, c.ox, c.oy
+      V.auto = (c.auto == true)
     else
       V.encuadrar(ED.m)
     end

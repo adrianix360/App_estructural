@@ -4,7 +4,8 @@
 --           aceptar=function(v) -> nil | "mensaje de error" , cancelar=fn }
 --      v[id] = numero | texto | indice de opcion. Num: ENTER aceptar, ESC cancelar, flechas arriba/abajo
 --      cambian de campo, izquierda/derecha cambian la opcion, el primer caracter reemplaza el valor.
---   D.menu{ titulo=, items={..}, sel=, elegir=function(i) }   (digitos 1-9 eligen directo)
+--   D.menu{ titulo=, items={..}, sel=, elegir=function(i), cancelar=fn, msg="texto" }
+--      (digitos 1-9 eligen directo; msg = parrafo opcional sobre las opciones)
 --   D.texto(titulo, lineas)   visor con desplazamiento       D.aviso(msg, titulo)   mensaje con ajuste
 local D = {}
 
@@ -74,9 +75,14 @@ function D.colocar(d)
     d.bh = TITH + vis * ROWH + 14 + BTNH + 6
   elseif d.kind == "menu" then
     bw = min(W - 8, d.ancho or 250)
-    local vis = min(#d.items, floor((H - TITH - 14) / ROWH))
+    d.mlin, d.mh = nil, 0
+    if d.msg then
+      d.mlin = D.ajustar(d.msg, bw - 16)
+      d.mh = #d.mlin * 12 + 6
+    end
+    local vis = min(#d.items, floor((H - TITH - 14 - d.mh) / ROWH))
     d.vis = vis
-    d.bh = TITH + vis * ROWH + 8
+    d.bh = TITH + d.mh + vis * ROWH + 8
   else
     bw = min(W - 8, 286)
     local vis = min(#d.lineas, floor((H - TITH - BTNH - 16) / 12))
@@ -112,7 +118,8 @@ end
 
 function D.menu(spec)
   local d = { kind = "menu", titulo = spec.titulo or "", items = spec.items, sel = spec.sel or 1,
-              top = 1, elegir = spec.elegir, ancho = spec.ancho, txt = {} }
+              top = 1, elegir = spec.elegir, ancho = spec.ancho, txt = {}, cancelar = spec.cancelar,
+              msg = spec.msg }
   for i, it in ipairs(d.items) do
     d.txt[i] = (i <= 9) and (i .. "  " .. it) or ("    " .. it)
   end
@@ -313,7 +320,7 @@ function D.mouseDown(x, y)
   elseif d.kind == "menu" then
     for k = 0, d.vis - 1 do
       local i = d.top + k
-      local ry = d.by + TITH + k * ROWH
+      local ry = d.by + TITH + d.mh + k * ROWH
       if i <= #d.items and dentro(x, y, d.bx, ry, d.bw, ROWH) then
         cur = nil
         if d.elegir then d.elegir(i) end
@@ -335,7 +342,7 @@ function D.mouseMove(x, y)
   if d.kind == "menu" then
     for k = 0, d.vis - 1 do
       local i = d.top + k
-      local ry = d.by + TITH + k * ROWH
+      local ry = d.by + TITH + d.mh + k * ROWH
       if i <= #d.items and dentro(x, y, d.bx, ry, d.bw, ROWH) then
         if d.sel ~= i then
           d.sel = i
@@ -429,20 +436,24 @@ function D.pintar(gc)
     boton(gc, x1, by, bw, "Aceptar (ENTER)", true)
     boton(gc, x2, by, bw, "Cancelar (ESC)", false)
   elseif d.kind == "menu" then
+    if d.mlin then
+      font(gc, "r", 9); col(gc, 20, 20, 20)
+      for k = 1, #d.mlin do gc:drawString(d.mlin[k], d.bx + 8, d.by + TITH + 3 + (k - 1) * 12, "top") end
+    end
     for k = 0, d.vis - 1 do
       local i = d.top + k
       local it = d.txt[i]
       if not it then break end
-      local ry = d.by + TITH + k * ROWH
+      local ry = d.by + TITH + d.mh + k * ROWH
       if i == d.sel then
         col(gc, 0, 90, 190); gc:fillRect(d.bx + 2, ry, d.bw - 4, ROWH); col(gc, 255, 255, 255)
       else col(gc, 20, 20, 20) end
       font(gc, "r", 9)
       gc:drawString(recortar(gc, it, d.bw - 14), d.bx + 8, ry + 2, "top")
     end
-    if d.top > 1 then flecha_scroll(gc, d.bx + d.bw - 12, d.by + TITH + 1, true) end
+    if d.top > 1 then flecha_scroll(gc, d.bx + d.bw - 12, d.by + TITH + d.mh + 1, true) end
     if d.top + d.vis - 1 < #d.items then
-      flecha_scroll(gc, d.bx + d.bw - 12, d.by + TITH + d.vis * ROWH - 5, false)
+      flecha_scroll(gc, d.bx + d.bw - 12, d.by + TITH + d.mh + d.vis * ROWH - 5, false)
     end
   else
     font(gc, "r", 9); col(gc, 20, 20, 20)

@@ -1,4 +1,4 @@
-# Estructural — análisis de vigas, marcos y cerchas en la TI-Nspire CX II CAS
+# Estructural v1.1 — análisis de vigas, marcos y cerchas en la TI-Nspire CX II CAS
 
 App en Lua para la TI-Nspire CX II / CX II CAS que modela y resuelve estructuras 2D con el **método de
 rigidez directa**, con manejo gráfico inspirado en Ftool: se dibuja con el touchpad y los resultados aparecen
@@ -19,6 +19,14 @@ de inmediato.
   de la barra) y la parte en dos, repartiendo cargas y conservando propiedades y rótulas; deshacer lo revierte en un paso.
 - **Unidades**: kN-m (omisión), N-m (SI) o tf-m, en menú *Ajustes → Unidades* o con `q`. Se aplican a todos los
   diálogos, etiquetas, reacciones, diagramas, valor al apuntar, tabla y ecuaciones. El modelo siempre se guarda en kN, m.
+- **Modo Marco / Cercha antes de dibujar** (v1.1): dos pastillas *Marco | Cercha* siempre visibles en la esquina superior
+  izquierda del lienzo (clic con el touchpad, tecla `k`, o `b` estando ya en Barra). Cada barra nueva nace con ese tipo;
+  las cerchas se dibujan con círculos huecos en los extremos y anillos en los nudos articulados. *Archivo → Nuevo* pregunta
+  qué vas a dibujar; *Ajustes → Convertir todo a cercha / a marco* cambia todas las barras en un paso (`u` deshace); si dibujas
+  un marco con cargas solo en nudos, al resolver sugiere convertirlo a cercha (una vez por modelo).
+- **Diagramas legibles**: la altura del diagrama depende de la barra más corta, las etiquetas no se encimen (máximos globales
+  primero, tope de 12), las cerchas muestran N como barras coloreadas (tracción azul, compresión roja) y `M = 0`/`V = 0` en vez
+  de ruido; al resolver se encuadra el modelo si hace falta.
 - **Clasificación** en vivo: isostática, hiperestática (con grado) o inestable, con mensajes en español.
 - **Resultados**: reacciones, diagramas N, V, M (momento del lado traccionado), deformada con escala ajustable o
   real, **valor al apuntar** (N, V, M, δ en cualquier punto), máximos y ceros, tabla de desplazamientos,
@@ -41,6 +49,8 @@ de inmediato.
 
 ## Uso rápido (viga simple en < 1 minuto)
 
+0. Al arrancar con el modelo vacío (y en *Archivo → Nuevo*) elige **1 Viga/Marco** o **2 Cercha** (`esc` conserva el modo actual);
+   puedes cambiarlo cuando quieras con las pastillas *Marco | Cercha*, `k` o `b b`.
 1. La app abre en la herramienta **Barra**: clic en (0,0) y clic en (6,0) crea dos nodos y la barra. `esc` termina.
 2. Tecla `a` (Apoyo): clic en el nodo 1 → *Articulado*; clic en el nodo 2 → *Rodillo X*.
 3. Tecla `c` (Carga): clic en la barra → *Distribuida uniforme*, valor 10, `enter`.
@@ -50,14 +60,15 @@ de inmediato.
 |---|---|---|---|
 | `s` | Seleccionar / mover (arrastre), `del` borra, `enter` edita | `r` `n` `v` `m` `d` | Reacciones, N, V, M, deformada |
 | `n` | Nodo (snap a la rejilla); clic sobre una barra la **divide** | `t` / `e` | Tabla / ecuaciones por tramo |
-| `b` | Barra (encadena clics); clic sobre una barra la divide | `+` `-` | Escala del diagrama o de la deformada |
+| `b` | Barra (encadena clics); clic sobre una barra la divide; `b` otra vez alterna Marco/Cercha | `+` `-` | Escala del diagrama o de la deformada |
 | `a` / `c` | Apoyo / carga (`enter` sobre la barra: lista de cargas) | `0` | Deformada real ↔ ampliada (también el selector en pantalla) |
 | `x` | Coordenadas exactas | flechas | Recorrer la barra / cambiar de barra |
 | `u` / `y` | Deshacer / rehacer | `l` o `?` | Leyenda de signos |
 | `e` / `+` `-` | Encuadrar / zoom | `esc` | Volver a modelar |
-| `q` | Cambiar unidades (kN-m → N-m → tf-m) | `g` `k` `p` | Rejilla, snap, propiedades globales |
+| `q` | Cambiar unidades (kN-m → N-m → tf-m) | `g` `j` `p` | Rejilla, snap, propiedades globales |
+| `k` | Alternar modo **Marco ↔ Cercha** (con una barra seleccionada ofrece `enter`: aplicar también a esa barra) | `h` | Guía rápida (al pie: autor y versión) |
 
-El menú `menu` tiene Archivo (ejemplos, guardar, abrir), Herramientas (incluye deshacer/rehacer), Vista (encuadre, zoom, deformada real/ampliada), Ajustes (unidades, rejilla, snap y propiedades globales) y Ayuda.
+El menú `menu` tiene Archivo (nuevo, ejemplos, guardar, abrir), Herramientas (incluye Marco/Cercha y deshacer/rehacer), Vista (encuadre, zoom, deformada real/ampliada), Ajustes (unidades, rejilla, snap, propiedades globales y convertir todo a cercha/marco) y Ayuda (guía rápida, leyenda de signos y *Acerca de*).
 
 ## Convenciones
 
@@ -67,6 +78,10 @@ giros antihorarios positivos. N positivo = tracción; M se dibuja del lado tracc
 
 **Supuestos**: Euler-Bernoulli, pequeñas deformaciones, material lineal elástico, 2D estático, un estado de carga,
 sin P-Δ ni deformación por cortante.
+
+## Autor
+
+**Adrián Castro Ramírez** — autor de Estructural (v1.1). Pantalla *Ayuda → Acerca de*.
 
 ## Desarrollo
 

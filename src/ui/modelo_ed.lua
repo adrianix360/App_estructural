@@ -235,7 +235,7 @@ end
 -- indice e y la rotula i; la segunda (barra nueva, al final) conserva la rotula j. Cargas: P y M van al
 -- tramo que las contiene (si caen justo en el corte pasan al nodo nuevo como carga nodal); w se recorta
 -- por tramo interpolando w1/w2; T se copia a ambas. Una barra "cercha" pasa a "portico" con extremos
--- articulados (equivalente, y evita un mecanismo en el nodo colineal).
+-- articulados (equivalente); sin cargas P/M/w conserva "cercha" en ambas mitades.
 -- Devuelve nodo_nuevo, barra_nueva | nil, msg.
 local MINSEG, EPSA = 1e-3, 1e-6
 function ED.dividir_barra(m, e, a)
@@ -249,6 +249,7 @@ function ED.dividir_barra(m, e, a)
   local x, y = na.x + (nb.x - na.x) * f, na.y + (nb.y - na.y) * f
   if ED.nodo_cerca(m, x, y, TOL) then return nil, "Ya hay un nodo en ese punto" end
   local cb, sb = (nb.x - na.x) / L, (nb.y - na.y) / L
+  local cargas0 = b.cargas
   m.nodos[#m.nodos + 1] = { x = x, y = y }
   local nn = #m.nodos
   local nuevo = ED.copiar(b)
@@ -292,11 +293,65 @@ function ED.dividir_barra(m, e, a)
   nuevo.cargas = c2
   b.nj, b.rot_j, b.cargas = nn, false, c1
   if b.tipo == "cercha" then
-    b.tipo, nuevo.tipo = "portico", "portico"
-    b.rot_i, nuevo.rot_j = true, true
+    -- sin cargas P/M/w sigue siendo cercha en ambas mitades (dos barras colineales sin una tercera
+    -- en el nodo nuevo son un mecanismo hasta conectarlo: el clasificador lo avisa). Con cargas en el
+    -- vano pasa a portico con extremos articulados (equivalente y estable)
+    local con_cargas = false
+    for k = 1, #cargas0 do
+      local t = cargas0[k].t
+      if t == "P" or t == "M" or t == "w" then con_cargas = true end
+    end
+    if con_cargas then
+      b.tipo, nuevo.tipo = "portico", "portico"
+      b.rot_i, nuevo.rot_j = true, true
+    end
   end
   m.barras[#m.barras + 1] = nuevo
   return nn, #m.barras
+end
+
+-- ------------------------------------------------- marco / cercha (v1.1)
+-- Fija el tipo de TODAS las barras del modelo m. "cercha" ya implica extremos articulados; "portico"
+-- (marco) deja nudos rigidos (sin rotulas). Devuelve cuantas barras cambiaron.
+function ED.convertir_todo(m, tipo)
+  tipo = (tipo == "cercha") and "cercha" or "portico"
+  local n = 0
+  for e = 1, #m.barras do
+    local b = m.barras[e]
+    if b.tipo ~= tipo or b.rot_i or b.rot_j then n = n + 1 end
+    b.tipo = tipo
+    b.rot_i, b.rot_j = false, false
+  end
+  return n
+end
+
+-- Cambia el modo de dibujo (tipo de las barras nuevas): "portico" (marco) | "cercha"
+function ED.set_tipo(tipo)
+  ED.props.tipo = (tipo == "cercha") and "cercha" or "portico"
+  return ED.props.tipo
+end
+
+-- true si el modelo parece una cercha dibujada como marco: todas las barras son porticos sin rotulas,
+-- sin cargas en barra, sin momento nodal, sin apoyo que restrinja el giro, >= 3 barras, y la copia
+-- convertida a cercha no es inestable
+function ED.parece_cercha(m)
+  if #m.barras < 3 then return false end
+  for e = 1, #m.barras do
+    local b = m.barras[e]
+    if b.tipo ~= "portico" or b.rot_i or b.rot_j or #b.cargas > 0 then return false end
+  end
+  for i = 1, #m.nodos do
+    local n = m.nodos[i]
+    if n.carga and n.carga.mz and n.carga.mz ~= 0 then return false end
+    local a = n.apoyo
+    if a and (a.rz or (a.kr or 0) > 0) then return false end
+  end
+  local ok, S = pcall(require, "core.solver")
+  if not ok or type(S) ~= "table" then return false end
+  local c = ED.copiar(m)
+  ED.convertir_todo(c, "cercha")
+  local ok2, cl = pcall(S.clasificar, c)
+  return ok2 and type(cl) == "table" and cl.tipo ~= "inestable"
 end
 
 -- ----------------------------------------------------------------- apoyos
