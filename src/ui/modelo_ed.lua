@@ -145,7 +145,9 @@ function ED.ajustar_cargas(m, e)
   local cambio = false
   for k = #b.cargas, 1, -1 do
     local c = b.cargas[k]
-    if c.t == "w" then
+    if c.t == "T" then
+      -- la carga termica afecta a toda la barra: no tiene posicion
+    elseif c.t == "w" then
       local a, bb = c.a, c.b
       if c.a > L then c.a = L end
       if c.b > L then c.b = L end
@@ -189,6 +191,13 @@ function ED.validar_carga(m, e, c)
     if c.b - c.a < 1e-6 then return nil, "El tramo debe tener b mayor que a" end
     if c.w1 == 0 and c.w2 == 0 then return nil, "La carga no puede ser cero" end
     if not DIRS[c.dir] then return nil, "Direccion no valida" end
+  elseif c.t == "T" then
+    if not (num(c.du) and num(c.dg)) then return nil, "Valores no validos" end
+    if c.alfa ~= nil and not (num(c.alfa) and c.alfa > 0) then return nil, "alfa debe ser mayor que 0" end
+    if c.du == 0 and c.dg == 0 then return nil, "La variacion de temperatura no puede ser cero" end
+    if c.dg ~= 0 and not (num(c.h) and c.h > 0) then
+      return nil, "Con gradiente (dg) el canto h debe ser mayor que 0"
+    end
   else
     return nil, "Tipo de carga desconocido"
   end
@@ -199,9 +208,95 @@ function ED.agregar_carga_barra(m, e, c)
   local ok, msg = ED.validar_carga(m, e, c)
   if not ok then return nil, msg end
   local b = m.barras[e]
-  if c.a < 0 then c.a = 0 end
+  if c.a and c.a < 0 then c.a = 0 end
   b.cargas[#b.cargas + 1] = c
   return true
+end
+
+-- Sustituye la carga k de la barra e (validada); la original queda intacta si falla
+function ED.reemplazar_carga_barra(m, e, k, c)
+  local b = m.barras[e]
+  if not (b and b.cargas[k]) then return nil, "La carga ya no existe" end
+  local ok, msg = ED.validar_carga(m, e, c)
+  if not ok then return nil, msg end
+  if c.a and c.a < 0 then c.a = 0 end
+  b.cargas[k] = c
+  return true
+end
+
+function ED.borrar_carga_barra(m, e, k)
+  local b = m.barras[e]
+  if not (b and b.cargas[k]) then return nil, "La carga ya no existe" end
+  table.remove(b.cargas, k)
+  return true
+end
+
+-- Divide la barra e en el punto a (m desde el nodo i) creando un nodo. La primera mitad conserva el
+-- indice e y la rotula i; la segunda (barra nueva, al final) conserva la rotula j. Cargas: P y M van al
+-- tramo que las contiene (si caen justo en el corte pasan al nodo nuevo como carga nodal); w se recorta
+-- por tramo interpolando w1/w2; T se copia a ambas. Una barra "cercha" pasa a "portico" con extremos
+-- articulados (equivalente, y evita un mecanismo en el nodo colineal).
+-- Devuelve nodo_nuevo, barra_nueva | nil, msg.
+local MINSEG, EPSA = 1e-3, 1e-6
+function ED.dividir_barra(m, e, a)
+  local b = m.barras[e]
+  if not b then return nil, "La barra no existe" end
+  if not num(a) then return nil, "Posicion no valida" end
+  local L = ED.longitud(m, e)
+  if a < MINSEG or a > L - MINSEG then return nil, "Demasiado cerca de un nodo: usa el nodo existente" end
+  local na, nb = m.nodos[b.ni], m.nodos[b.nj]
+  local f = a / L
+  local x, y = na.x + (nb.x - na.x) * f, na.y + (nb.y - na.y) * f
+  if ED.nodo_cerca(m, x, y, TOL) then return nil, "Ya hay un nodo en ese punto" end
+  local cb, sb = (nb.x - na.x) / L, (nb.y - na.y) / L
+  m.nodos[#m.nodos + 1] = { x = x, y = y }
+  local nn = #m.nodos
+  local nuevo = ED.copiar(b)
+  local c1, c2 = {}, {}
+  local fx, fy, mz = 0, 0, 0
+  for k = 1, #b.cargas do
+    local c = b.cargas[k]
+    if c.t == "P" or c.t == "M" then
+      if abs(c.a - a) <= EPSA then
+        if c.t == "M" then mz = mz + c.m
+        elseif c.dir == "GX" then fx = fx + c.p
+        elseif c.dir == "L" then fx = fx - sb * c.p; fy = fy + cb * c.p
+        elseif c.dir == "LX" then fx = fx + cb * c.p; fy = fy + sb * c.p
+        else fy = fy + c.p end
+      elseif c.a < a then c1[#c1 + 1] = ED.copiar(c)
+      else
+        local q = ED.copiar(c); q.a = c.a - a; c2[#c2 + 1] = q
+      end
+    elseif c.t == "w" then
+      if c.b <= a + 1e-9 then c1[#c1 + 1] = ED.copiar(c)
+      elseif c.a >= a - 1e-9 then
+        local q = ED.copiar(c); q.a, q.b = c.a - a, c.b - a; c2[#c2 + 1] = q
+      else
+        local ws = c.w1 + (c.w2 - c.w1) * (a - c.a) / (c.b - c.a)
+        local q1 = ED.copiar(c); q1.b, q1.w2 = a, ws
+        local q2 = ED.copiar(c); q2.a, q2.b, q2.w1 = 0, c.b - a, ws
+        if q1.b - q1.a > 1e-6 then c1[#c1 + 1] = q1 end
+        if q2.b - q2.a > 1e-6 then c2[#c2 + 1] = q2 end
+      end
+    else
+      c1[#c1 + 1] = ED.copiar(c)
+      c2[#c2 + 1] = ED.copiar(c)
+    end
+  end
+  if fx ~= 0 or fy ~= 0 or mz ~= 0 then
+    local nd = m.nodos[nn]
+    nd.carga = { fx = fx, fy = fy, mz = mz }
+  end
+  nuevo.ni, nuevo.nj = nn, b.nj
+  nuevo.rot_i, nuevo.rot_j = false, b.rot_j and true or false
+  nuevo.cargas = c2
+  b.nj, b.rot_j, b.cargas = nn, false, c1
+  if b.tipo == "cercha" then
+    b.tipo, nuevo.tipo = "portico", "portico"
+    b.rot_i, nuevo.rot_j = true, true
+  end
+  m.barras[#m.barras + 1] = nuevo
+  return nn, #m.barras
 end
 
 -- ----------------------------------------------------------------- apoyos

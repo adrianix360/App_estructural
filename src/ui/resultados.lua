@@ -19,6 +19,8 @@ local V0 = require("ui.vista")
 local D = require("ui.dialogo")
 local E = require("core.esfuerzos")
 local CAS = require("ui.cas")
+local U = require("ui.unidades")
+local PL = require("core.poly")
 
 local R = {}
 
@@ -47,7 +49,14 @@ local cl_ok, cl_val, cl_txt = false, nil, ""
 local VISTAS = { "reac", "N", "V", "M", "def", "tabla", "ecs" }
 local NOMBRE = { reac = "Reacciones", N = "Axial N", V = "Cortante V", M = "Momento M",
                  def = "Deformada", tabla = "Tabla", ecs = "Ecuaciones" }
-local UNID = { N = "kN", V = "kN", M = "kN·m" }
+local function unid(campo)
+  if campo == "M" then return U.etiqueta("momento") end
+  return U.etiqueta("fuerza")
+end
+local function conv(campo, v)
+  if campo == "M" then return v * U.factor("momento") end
+  return v * U.factor("fuerza")
+end
 local COL = {
   N = { 140, 50, 190 }, V = { 215, 30, 30 }, M = { 20, 70, 225 },
   def = { 0, 150, 60 }, reac = { 205, 0, 165 },
@@ -55,22 +64,8 @@ local COL = {
 local TINTE = { N = { 214, 184, 232 }, V = { 244, 176, 176 }, M = { 172, 194, 248 } }
 
 -- ------------------------------------------------------------------ numeros
--- Cifras significativas sin notacion cientifica; |v| < 1e-6 se muestra 0.
-local function num(v, sig)
-  if v ~= v then return "nan" end
-  local a = abs(v)
-  if a < 1e-6 then return "0" end
-  sig = sig or 4
-  local d = sig - 1 - floor(log10(a) + 1e-12)
-  if d < 0 then d = 0 elseif d > 8 then d = 8 end
-  local s = format("%." .. d .. "f", v)
-  if s:find(".", 1, true) then
-    s = s:gsub("0+$", "")
-    s = s:gsub("%.$", "")
-  end
-  if s == "-0" then s = "0" end
-  return s
-end
+-- Cifras significativas sin notacion cientifica; |v| < 1e-6 se muestra 0 (ver ui.unidades).
+local num = U.num
 R.num = num
 
 local function exp_txt(v)
@@ -288,6 +283,28 @@ function R.set_vista(v)
   end
 end
 
+-- Deformada real (factor 1) o ampliada (factor automatico, ajustable con +/-)
+function R.fijar_def(real)
+  R.def_real = real and true or false
+  if not R.def_real then R.def_f = nil end
+end
+
+function R.toggle_def()
+  R.fijar_def(not R.def_real)
+end
+
+-- Tras cambiar el sistema de unidades: todo texto en cache se rehace
+function R.unidades_cambiaron()
+  cache = {}
+  R.tab_rows, R.ecs = nil, nil
+  R.ver = R.ver + 1
+  local c = R.cur
+  if c and R.res then
+    if c.e then punto_barra(c.e, c.x, c.src)
+    elseif c.nodo then punto_nodo(c.nodo, c.src) end
+  end
+end
+
 function R.siguiente(dir)
   local k = 1
   for i = 1, #VISTAS do if VISTAS[i] == R.modo then k = i end end
@@ -342,15 +359,17 @@ function punto_barra(e, x, src)
   if not c then c = {}; R.cur = c end
   c.e, c.nodo, c.x, c.src = e, nil, x, src
   c.N, c.V, c.M, c.th, c.v, c.u, c.ux, c.uy = N, Vv, M, th, v, u, ux, uy
-  local sN, sV, sM = num(N), num(Vv), num(M)
-  local sd = num(d * 1000)
+  local kF, kM, kD = U.factor("fuerza"), U.factor("momento"), U.factor("desp")
+  local uF, uM, uD = U.etiqueta("fuerza"), U.etiqueta("momento"), U.etiqueta("desp")
+  local sN, sV, sM = num(N * kF), num(Vv * kF), num(M * kM)
+  local sd = num(d * kD)
   c.l1 = "Barra " .. e .. "  x=" .. num(x, 3) .. " m"
-  c.l2 = "N=" .. sN .. "  V=" .. sV .. " kN"
-  c.l3 = "M=" .. sM .. " kN·m"
-  c.l4 = "δ=" .. sd .. " mm (" .. num(ux * 1000) .. "; " .. num(uy * 1000) .. ")"
+  c.l2 = "N=" .. sN .. "  V=" .. sV .. " " .. uF
+  c.l3 = "M=" .. sM .. " " .. uM
+  c.l4 = "δ=" .. sd .. " " .. uD .. " (" .. num(ux * kD) .. "; " .. num(uy * kD) .. ")"
   c.l5 = nil
-  c.txt = "B" .. e .. " x=" .. num(x, 3) .. " m | N=" .. sN .. " V=" .. sV .. " kN M=" .. sM
-    .. " kN·m | δ=" .. sd .. " mm"
+  c.txt = "B" .. e .. " x=" .. num(x, 3) .. " m | N=" .. sN .. " V=" .. sV .. " " .. uF .. " M=" .. sM
+    .. " " .. uM .. " | δ=" .. sd .. " " .. uD
   R.eb = e
   return c.txt
 end
@@ -362,19 +381,21 @@ function punto_nodo(i, src)
   local c = R.cur
   if not c then c = {}; R.cur = c end
   c.e, c.x, c.nodo, c.src = nil, nil, i, src
+  local kF, kM, kD, kG = U.factor("fuerza"), U.factor("momento"), U.factor("desp"), U.factor("giro")
+  local uF, uM, uD, uG = U.etiqueta("fuerza"), U.etiqueta("momento"), U.etiqueta("desp"), U.etiqueta("giro")
   c.l1 = "Nodo " .. i
-  c.l2 = "ux=" .. num(d.ux * 1000) .. "  uy=" .. num(d.uy * 1000) .. " mm"
-  c.l3 = d.rz and ("rz=" .. num(d.rz * 1000) .. " mrad") or "rz: nudo articulado"
+  c.l2 = "ux=" .. num(d.ux * kD) .. "  uy=" .. num(d.uy * kD) .. " " .. uD
+  c.l3 = d.rz and ("rz=" .. num(d.rz * kG) .. " " .. uG) or "rz: nudo articulado"
   local rc = res.reac[i]
   if rc then
-    c.l4 = "Rx=" .. num(rc.rx) .. " Ry=" .. num(rc.ry) .. " kN"
-    c.l5 = (rc.mz and abs(rc.mz) > 1e-6) and ("Mz=" .. num(rc.mz) .. " kN·m") or nil
+    c.l4 = "Rx=" .. num(rc.rx * kF) .. " Ry=" .. num(rc.ry * kF) .. " " .. uF
+    c.l5 = (rc.mz and abs(rc.mz) > 1e-6) and ("Mz=" .. num(rc.mz * kM) .. " " .. uM) or nil
   else
     c.l4, c.l5 = nil, nil
   end
-  c.txt = "Nodo " .. i .. " | ux=" .. num(d.ux * 1000) .. " uy=" .. num(d.uy * 1000) .. " mm"
-    .. (d.rz and (" rz=" .. num(d.rz * 1000) .. " mrad") or "")
-    .. (rc and (" | Rx=" .. num(rc.rx) .. " Ry=" .. num(rc.ry) .. " kN") or "")
+  c.txt = "Nodo " .. i .. " | ux=" .. num(d.ux * kD) .. " uy=" .. num(d.uy * kD) .. " " .. uD
+    .. (d.rz and (" rz=" .. num(d.rz * kG) .. " " .. uG) or "")
+    .. (rc and (" | Rx=" .. num(rc.rx * kF) .. " Ry=" .. num(rc.ry * kF) .. " " .. uF) or "")
   return c.txt
 end
 
@@ -473,13 +494,13 @@ local function cache_diag(campo)
       if vmax - vmin <= 1e-9 * c.maxabs then
         -- campo constante (p. ej. N en una cercha): una sola etiqueta en el centro
         if abs(vmax) > tiny then
-          b.lab[1] = { x = L / 2, val = vmax, txt = num(vmax) }
+          b.lab[1] = { x = L / 2, val = vmax, txt = num(conv(campo, vmax)) }
         end
       else
         local ex = b.ex
         for i = 1, #ex do
           if abs(ex[i].val) > tiny then
-            b.lab[#b.lab + 1] = { x = ex[i].x, val = ex[i].val, txt = num(ex[i].val) }
+            b.lab[#b.lab + 1] = { x = ex[i].x, val = ex[i].val, txt = num(conv(campo, ex[i].val)) }
           end
         end
       end
@@ -565,9 +586,9 @@ local function cache_reac()
     local rc = res.reac[i]
     if rc then
       local it = { i = i, vx = 0, vy = 0 }
-      if abs(rc.rx) > tol then it.rx = rc.rx; it.trx = "Rx=" .. num(rc.rx) .. " kN" end
-      if abs(rc.ry) > tol then it.ry = rc.ry; it.try = "Ry=" .. num(rc.ry) .. " kN" end
-      if rc.mz and abs(rc.mz) > tol then it.mz = rc.mz; it.tmz = "Mz=" .. num(rc.mz) .. " kN·m" end
+      if abs(rc.rx) > tol then it.rx = rc.rx; it.trx = "Rx=" .. num(rc.rx * U.factor("fuerza")) .. " " .. U.etiqueta("fuerza") end
+      if abs(rc.ry) > tol then it.ry = rc.ry; it.try = "Ry=" .. num(rc.ry * U.factor("fuerza")) .. " " .. U.etiqueta("fuerza") end
+      if rc.mz and abs(rc.mz) > tol then it.mz = rc.mz; it.tmz = "Mz=" .. num(rc.mz * U.factor("momento")) .. " " .. U.etiqueta("momento") end
       -- direccion media (mundo) hacia las barras vecinas, para desplazar las flechas al lado libre
       for e = 1, #m.barras do
         local b = m.barras[e]
@@ -840,20 +861,21 @@ local function pintar_cursor(gc)
   local PR = PRm
   local res = R.res
   local modo = R.modo
-  local qxm
+  local qxm, qym
   if c.e then
     local rb = res.barras[c.e]
     if not rb then return end
     local S = V0.s
     local sx0, sy0 = V0.a_pantalla(rb.xi, rb.yi)
     local bx, by = sx0 + rb.c * S * c.x, sy0 - rb.s * S * c.x
-    qxm = bx
+    qxm, qym = bx, by
     local col = COL[modo] or COL.M
     if modo == "N" or modo == "V" or modo == "M" then
       local cd = cache_diag(modo)
       local val = c[modo] or 0
       local off = val * cd.kpx * R.kd[modo] * ((modo == "M") and -1 or 1)
       local qx, qy = bx - rb.s * off, by - rb.c * off
+      qxm, qym = qx, qy
       PR.setc(gc, col); PR.pen(gc, "thin", "dotted")
       PR.ln(gc, bx, by, qx, qy)
       PR.pen(gc, "thin", "smooth")
@@ -865,6 +887,7 @@ local function pintar_cursor(gc)
       local X = rb.xi + rb.c * c.x + f * c.ux
       local Y = rb.yi + rb.s * c.x + f * c.uy
       local qx, qy = V0.ox + X * S, V0.oy - Y * S
+      qxm, qym = qx, qy
       PR.setc(gc, col)
       PR.ln(gc, bx, by, qx, qy)
       PR.setc(gc, PR.C.fondo); PR.disco(gc, qx, qy, 5)
@@ -876,11 +899,12 @@ local function pintar_cursor(gc)
     local nd = ED.m.nodos[c.nodo]
     if nd then
       local qx, qy = V0.a_pantalla(nd.x, nd.y)
-      qxm = qx
+      qxm, qym = qx, qy
       PR.setc(gc, PR.C.info); PR.anillo(gc, qx, qy, 8)
     end
   end
-  -- recuadro con los valores (derecha; a la izquierda si el cursor esta cerca de ese lado)
+  -- recuadro con los valores: en la esquina del lienzo mas alejada del punto apuntado, sin tapar las
+  -- etiquetas ya colocadas, la cabecera ni el selector de deformada
   local n = c.l5 and 5 or (c.l4 and 4 or 3)
   PR.fuente(gc, "r", 7)
   local w = gc:getStringWidth(c.l1)
@@ -890,11 +914,28 @@ local function pintar_cursor(gc)
   if t4 then a = gc:getStringWidth(t4); if a > w then w = a end end
   if t5 then a = gc:getStringWidth(t5); if a > w then w = a end end
   w = w + 8
-  local R0 = V0.rect
-  local bx = R0.x + R0.w - w - 3
-  local by = R0.y + 2
-  if qxm and qxm > bx - 10 then bx = R0.x + 3; by = R0.y + 24 end
   local h = n * 10 + 4
+  local R0 = V0.rect
+  local xs0, xs1 = R0.x + 3, R0.x + R0.w - w - 3
+  local ys0, ys1 = R0.y + 2, R0.y + R0.h - h - 14
+  local mejor, bx, by, mscore = nil, xs1, ys0, nil
+  local cxp, cyp = qxm or (R0.x + R0.w / 2), qym or (R0.y + R0.h / 2)
+  for k = 0, 3 do
+    local x = (k % 2 == 0) and xs1 or xs0
+    local y = (k < 2) and ys0 or ys1
+    local solapes = 0
+    for i = 1, nlb, 4 do
+      if x < LB[i + 2] and x + w > LB[i] and y < LB[i + 3] and y + h > LB[i + 1] then solapes = solapes + 1 end
+    end
+    -- el cursor no debe quedar bajo el recuadro
+    if cxp > x - 8 and cxp < x + w + 8 and cyp > y - 8 and cyp < y + h + 8 then solapes = solapes + 50 end
+    local dxm, dym = x + w / 2 - cxp, y + h / 2 - cyp
+    local dist = dxm * dxm + dym * dym
+    local score = solapes * 1e6 - dist
+    if not mscore or score < mscore then mscore, bx, by = score, x, y end
+  end
+  local cj = R.caja
+  cj.x, cj.y, cj.w, cj.h, cj.px, cj.py = bx, by, w, h, cxp, cyp
   PR.setc(gc, PR.C.fondo); gc:fillRect(bx, by, w, h)
   PR.setc(gc, PR.C.tb_borde); gc:drawRect(bx, by, w, h)
   PR.setc(gc, PR.C.texto)
@@ -905,37 +946,88 @@ local function pintar_cursor(gc)
   if t5 then gc:drawString(t5, bx + 4, by + 42, "top") end
 end
 
+R.caja = { x = 0, y = 0, w = 0, h = 0, px = 0, py = 0 }   -- ultimo recuadro de valores (para pruebas)
+
 -- ---------------------------------------------------------- cabecera de la vista
 local hk_modo, hk_kd, hk_f, hk_real, hk_ver
 local hdr1, hdr2 = "", ""
-local function cabecera(gc)
-  local PR = PRm
+local function preparar_cabecera()
   local modo = R.modo
-  local R0 = V0.rect
   local kd = R.kd[modo]
   if hk_modo ~= modo or hk_kd ~= kd or hk_f ~= R.def_f or hk_real ~= R.def_real or hk_ver ~= R.ver then
     hk_modo, hk_kd, hk_f, hk_real, hk_ver = modo, kd, R.def_f, R.def_real, R.ver
     if modo == "N" or modo == "V" or modo == "M" then
       local c = cache_diag(modo)
-      hdr1 = NOMBRE[modo] .. " [" .. UNID[modo] .. "]"
+      hdr1 = NOMBRE[modo] .. " [" .. unid(modo) .. "]"
       if c.kpx == 0 then hdr2 = modo .. " = 0 en toda la estructura"
-      else hdr2 = "max " .. num(c.maxabs) .. " | escala x" .. num(kd, 3) .. " (+/-)" end
+      else hdr2 = "max " .. num(conv(modo, c.maxabs)) .. " " .. unid(modo) .. " | escala x" .. num(kd, 3) .. " (+/-)" end
     elseif modo == "def" then
       local c = cache_def()
       hdr1 = "Deformada x " .. num(factor_def(), 3) .. (R.def_real and " (real)" or "")
       if c.dmax > 1e-12 then
-        hdr2 = "δmax=" .. num(c.dmax * 1000) .. " mm (B" .. c.dmax_e .. ", x=" .. num(c.dmax_x, 3) .. " m)"
+        hdr2 = "δmax=" .. num(c.dmax * U.factor("desp")) .. " " .. U.etiqueta("desp") .. " (B" .. c.dmax_e
+          .. ", x=" .. num(c.dmax_x, 3) .. " m)"
       else
         hdr2 = "sin desplazamientos"
       end
     else
-      hdr1 = "Reacciones [kN, kN·m]"
+      hdr1 = "Reacciones [" .. U.etiqueta("fuerza") .. ", " .. U.etiqueta("momento") .. "]"
       hdr2 = "flecha = sentido de la reaccion"
     end
   end
+end
+
+local function cabecera(gc)
+  local PR = PRm
+  local R0 = V0.rect
   PR.txt(gc, hdr1, R0.x + 4, R0.y + 1, 9, "l", "b")
   PR.setc(gc, PR.C.etiq)
   PR.txt(gc, hdr2, R0.x + 4, R0.y + 13, 7, "l")
+end
+
+-- Selector explicito de deformada: [Real] [Ampliada xN] (arriba a la derecha, clicable)
+R.sel_def = { x = 0, y = 0, w = 0, h = 0, xr = 0, wr = 0, xa = 0, wa = 0, activo = false }
+local function geometria_selector(gc)
+  local PR = PRm
+  local R0 = V0.rect
+  local sd = R.sel_def
+  PR.fuente(gc, "r", 7)
+  local ta = "Ampliada x" .. num(R.def_f or cache_def().f_auto, 3)
+  sd.ta = ta
+  sd.wr = gc:getStringWidth("Real") + 8
+  sd.wa = gc:getStringWidth(ta) + 8
+  sd.h = 12
+  sd.w = sd.wr + sd.wa + 2
+  sd.x = R0.x + R0.w - sd.w - 3
+  sd.xr = sd.x
+  sd.xa = sd.x + sd.wr + 2
+  sd.y = R0.y + 2
+  sd.activo = true
+end
+
+local function pintar_selector(gc)
+  local PR = PRm
+  local sd = R.sel_def
+  for k = 1, 2 do
+    local x, w = (k == 1) and sd.xr or sd.xa, (k == 1) and sd.wr or sd.wa
+    local on = (k == 1) == R.def_real
+    if on then PR.setc(gc, PR.C.tb_act) else PR.setc(gc, PR.C.fondo) end
+    gc:fillRect(x, sd.y, w, sd.h)
+    if on then PR.setc(gc, PR.C.tb_act_b) else PR.setc(gc, PR.C.tb_borde) end
+    gc:drawRect(x, sd.y, w, sd.h)
+    PR.setc(gc, on and PR.C.tb_act_b or COL.def)
+    PR.txt(gc, (k == 1) and "Real" or sd.ta, x + floor(w / 2), sd.y + 1, 7, "c", on and "b" or "r")
+  end
+end
+
+-- true si (x,y) cayo en el selector de deformada (y lo aplica)
+function R.clic_selector(x, y)
+  local sd = R.sel_def
+  if R.modo ~= "def" or not R.res or not sd.activo then return false end
+  if y < sd.y or y >= sd.y + sd.h then return false end
+  if x >= sd.xr and x < sd.xr + sd.wr then R.fijar_def(true); return true end
+  if x >= sd.xa and x < sd.xa + sd.wa then R.fijar_def(false); return true end
+  return false
 end
 
 -- ------------------------------------------------------------ pantalla de error
@@ -964,40 +1056,42 @@ local function construir_tabla()
   local function t(s, bold) rows[#rows + 1] = { k = "t", s = s, b = bold } end
   local function fila(xs, cells, head, izq) rows[#rows + 1] = { k = "c", xs = xs, c = cells, h = head, izq = izq or 1 } end
   t("Clasificacion: " .. (cl_txt ~= "" and cl_txt or "-"), true)
+  local kF, kM, kD, kG = U.factor("fuerza"), U.factor("momento"), U.factor("desp"), U.factor("giro")
+  local uF, uM, uD, uG = U.etiqueta("fuerza"), U.etiqueta("momento"), U.etiqueta("desp"), U.etiqueta("giro")
   local XN = { 6, 96, 170, 250 }
   t("Desplazamientos nodales", true)
-  fila(XN, { "Nodo", "ux [mm]", "uy [mm]", "rz [mrad]" }, true)
+  fila(XN, { "Nodo", "ux [" .. uD .. "]", "uy [" .. uD .. "]", "rz [" .. uG .. "]" }, true)
   for i = 1, #m.nodos do
     local d = res.d[i]
     if d then
-      fila(XN, { tostring(i), num(d.ux * 1000), num(d.uy * 1000), d.rz and num(d.rz * 1000) or "-" })
+      fila(XN, { tostring(i), num(d.ux * kD), num(d.uy * kD), d.rz and num(d.rz * kG) or "-" })
     end
   end
   t("Reacciones", true)
-  fila(XN, { "Nodo", "Rx [kN]", "Ry [kN]", "Mz [kN·m]" }, true)
+  fila(XN, { "Nodo", "Rx [" .. uF .. "]", "Ry [" .. uF .. "]", "Mz [" .. uM .. "]" }, true)
   local hay = false
   for i = 1, #m.nodos do
     local rc = res.reac[i]
     if rc then
       hay = true
-      fila(XN, { tostring(i), num(rc.rx), num(rc.ry), rc.mz and num(rc.mz) or "0" })
+      fila(XN, { tostring(i), num(rc.rx * kF), num(rc.ry * kF), rc.mz and num(rc.mz * kM) or "0" })
     end
   end
   if not hay then t("(sin apoyos)") end
   local XB = { 6, 62, 160, 226, 300 }
   t("Esfuerzos en extremos de barra (convencion de la leyenda)", true)
-  fila(XB, { "Barra", "Extremo", "N [kN]", "V [kN]", "M [kN·m]" }, true, 2)
+  fila(XB, { "Barra", "Extremo", "N [" .. uF .. "]", "V [" .. uF .. "]", "M [" .. uM .. "]" }, true, 2)
   for e = 1, #res.barras do
     local rb = res.barras[e]
     local N0, V0v, M0 = E.eval(res, e, 0)
     local N1, V1, M1 = E.eval(res, e, rb.L)
-    fila(XB, { tostring(e) .. " (" .. rb.ni .. "-" .. rb.nj .. ")", "i  x=0", num(N0), num(V0v), num(M0) }, false, 2)
-    fila(XB, { "L=" .. num(rb.L, 3) .. " m", "j  x=L", num(N1), num(V1), num(M1) }, false, 2)
+    fila(XB, { tostring(e) .. " (" .. rb.ni .. "-" .. rb.nj .. ")", "i  x=0", num(N0 * kF), num(V0v * kF), num(M0 * kM) }, false, 2)
+    fila(XB, { "L=" .. num(rb.L, 3) .. " m", "j  x=L", num(N1 * kF), num(V1 * kF), num(M1 * kM) }, false, 2)
   end
   local eq = res.equilibrio
   t("Equilibrio global (cargas + reacciones)", true)
   if eq then
-    t("SFx=" .. exp_txt(eq.fx) .. "  SFy=" .. exp_txt(eq.fy) .. "  SM=" .. exp_txt(eq.m))
+    t("SFx=" .. exp_txt(eq.fx) .. "  SFy=" .. exp_txt(eq.fy) .. "  SM=" .. exp_txt(eq.m) .. "  (kN, kN·m)")
     t("Residuo relativo: " .. exp_txt(eq.rel or 0) .. ((eq.rel or 0) < 1e-9 and "  (equilibrio correcto)" or "  (REVISAR)"))
   end
   R.tab_rows = rows
@@ -1061,15 +1155,23 @@ local function construir_ecs()
   local ncas, ntot = 0, 0
   local function add(s, tipo) lines[#lines + 1] = { s = s, t = tipo or "r" } end
   add("Barra " .. e .. "  (nodos " .. rb.ni .. "-" .. rb.nj .. ", L=" .. num(rb.L, 4) .. " m)", "h")
+  -- x siempre en m; los coeficientes se escalan para que los valores salgan en las unidades del sistema
+  local kF, kM, kD = U.factor("fuerza"), U.factor("momento"), U.factor("desp")
+  local ESC = { V = kF, N = kF, M = kM, th = 1, y = kD }
   for k = 1, #eqs do
     local q = eqs[k]
     add("Tramo " .. k .. ":  " .. num(q.x0, 4) .. " <= x <= " .. num(q.x1, 4) .. " m", "s")
     for j = 1, #CAMPOS_ECS do
       local key, nom = CAMPOS_ECS[j][1], CAMPOS_ECS[j][2]
-      local txt, src = CAS.ecuacion(q[key], q.x0, q.x1, rb.L)
-      ntot = ntot + 1
-      if src == "CAS" then ncas = ncas + 1 end
-      add(nom .. " = " .. txt, "r")
+      local p = q[key]
+      if ESC[key] ~= 1 then p = PL.scale(p, ESC[key]) end
+      local txt, src = CAS.ecuacion(p, q.x0, q.x1, rb.L)
+      -- N(x) = 0 (vigas sin carga axial) no aporta: se omite
+      if not (key == "N" and txt == "0") then
+        ntot = ntot + 1
+        if src == "CAS" then ncas = ncas + 1 end
+        add(nom .. " = " .. txt, "r")
+      end
     end
   end
   local fuente
@@ -1130,7 +1232,7 @@ local function pintar_ecs(gc)
     ecs.vl = vl
   end
   local vl = ecs.vl
-  local top = R0.y + 27
+  local top = R0.y + 31
   local vis = floor((R0.y + R0.h - top) / 12)
   local n = #vl
   local maxs = max(0, n - vis)
@@ -1140,8 +1242,11 @@ local function pintar_ecs(gc)
   PR.txt(gc, "Ecuaciones por tramo", R0.x + 4, R0.y + 1, 9, "l", "b")
   PR.setc(gc, PR.C.etiq)
   PR.txt(gc, "Barra " .. R.eb .. "/" .. #R.res.barras .. "  (< > cambia)", R0.x + R0.w - 4, R0.y + 3, 7, "r")
-  PR.txt(gc, "x desde el nodo i; kN, m, rad. Motor: " .. ecs.fuente, R0.x + 4, R0.y + 15, 7, "l")
-  PR.setc(gc, PR.C.tb_borde); gc:drawLine(R0.x, R0.y + 25, R0.x + R0.w - 1, R0.y + 25)
+  local uF, uM, uD = U.etiqueta("fuerza"), U.etiqueta("momento"), U.etiqueta("desp")
+  PR.txt(gc, "x en m desde el nodo i | N,V en " .. uF .. " | M en " .. uM .. " | θ en rad | y en " .. uD,
+    R0.x + 4, R0.y + 13, 7, "l")
+  PR.txt(gc, "Motor: " .. ecs.fuente, R0.x + 4, R0.y + 21, 7, "l")
+  PR.setc(gc, PR.C.tb_borde); gc:drawLine(R0.x, R0.y + 29, R0.x + R0.w - 1, R0.y + 29)
   for k = 1, vis do
     local l = vl[R.scroll + k]
     if not l then break end
@@ -1155,7 +1260,7 @@ local function pintar_ecs(gc)
     end
   end
   PR.setc(gc, PR.C.gris)
-  if R.scroll > 0 then PR.txt(gc, "^", R0.x + R0.w - 8, R0.y + 27, 7, "c") end
+  if R.scroll > 0 then PR.txt(gc, "^", R0.x + R0.w - 8, R0.y + 31, 7, "c") end
   if R.scroll < maxs then PR.txt(gc, "v", R0.x + R0.w - 8, R0.y + R0.h - 10, 7, "c") end
 end
 
@@ -1164,8 +1269,26 @@ function R.pintar(gc, V, m, PR)
   if not R.modo then return end
   PRm = PR
   nlb, nlt = 0, 0
+  R.sel_def.activo = false
   if not R.res then pintar_error(gc); return end
   local modo = R.modo
+  if modo ~= "tabla" and modo ~= "ecs" then
+    -- zonas reservadas (cabecera y selector): ni etiquetas ni el recuadro de valores las tapan
+    preparar_cabecera()
+    local R0 = V0.rect
+    PR.fuente(gc, "b", 9)
+    local w1 = gc:getStringWidth(hdr1)
+    PR.fuente(gc, "r", 7)
+    local w2 = gc:getStringWidth(hdr2)
+    LB[1], LB[2], LB[3], LB[4] = R0.x + 2, R0.y, R0.x + 8 + max(w1, w2), R0.y + 22
+    nlb = 4
+    if modo == "def" then
+      geometria_selector(gc)
+      local sd = R.sel_def
+      LB[5], LB[6], LB[7], LB[8] = sd.x - 1, sd.y - 1, sd.x + sd.w + 1, sd.y + sd.h + 1
+      nlb = 8
+    end
+  end
   if modo == "reac" then
     pintar_reac(gc)
   elseif modo == "N" or modo == "V" or modo == "M" then
@@ -1181,6 +1304,7 @@ function R.pintar(gc, V, m, PR)
   end
   PR.setc(gc, COL[modo] or PR.C.texto)
   cabecera(gc)
+  if modo == "def" then pintar_selector(gc) end
   pintar_cursor(gc)
 end
 
@@ -1201,11 +1325,11 @@ function R.estado()
   ek_modo, ek_kd, ek_f, ek_real, ek_scroll, ek_eb, ek_ver = modo, kd, R.def_f, R.def_real, R.scroll, R.eb, R.ver
   local t
   if modo == "reac" then
-    t = "Reacciones [kN, kN·m] | apunta a barra o nodo"
+    t = "Reacciones [" .. U.etiqueta("fuerza") .. ", " .. U.etiqueta("momento") .. "] | apunta a barra o nodo"
   elseif modo == "N" or modo == "V" or modo == "M" then
-    t = modo .. " [" .. UNID[modo] .. "] esc x" .. num(kd, 3) .. " (+/-) | apunta o usa flechas"
+    t = modo .. " [" .. unid(modo) .. "] esc x" .. num(kd, 3) .. " (+/-) | apunta o usa flechas"
   elseif modo == "def" then
-    t = "Deformada x " .. num(factor_def(), 3) .. (R.def_real and " (real)" or "") .. " | +/- factor, 0 real"
+    t = "Deformada " .. (R.def_real and "real" or ("ampliada x" .. num(factor_def(), 3))) .. " | 0 alterna, +/- factor"
   elseif modo == "tabla" then
     t = "Tabla | flechas desplazan (izq/der: pagina)"
   else
@@ -1217,12 +1341,12 @@ end
 
 function R.leyenda()
   local fuente = {
-    "Unidades: kN, m, rad (desplaz. en mm).",
+    "Unidades (menu Ajustes > Unidades): " .. U.actual .. ". Internamente el modelo es kN, m, rad; solo cambia lo que se ve y se teclea.",
     "Ejes: x derecha, y arriba, giro + antihorario. Ejes locales: x de nodo i a j, y local = x girado 90 grados antihorario.",
     "N: + = TRACCION, - = compresion. Se dibuja hacia +y local.",
     "V: suma de fuerzas transversales a la izquierda de la seccion (+ hacia +y local). V = dM/dx.",
     "M: + comprime la fibra +y local (viga horizontal: traccion abajo). El diagrama M se dibuja del lado TRACCIONADO.",
-    "Deformada: ampliada por el factor 'x N' (0 = real, escala 1).",
+    "Deformada: ampliada por el factor 'x N' o real (escala 1). Selector Real / Ampliada arriba a la derecha, o tecla 0.",
     "Reacciones (magenta): flecha en el sentido de la fuerza que ejerce el apoyo; Mz + antihorario.",
     "Circulos sobre la barra: puntos de V=0 o M=0.",
     "TECLAS: r Reac, n N, v V, m M, d Deformada, t Tabla, e Ecuaciones, TAB siguiente vista.",
@@ -1266,8 +1390,7 @@ function R.tecla(c)
     return false
   end
   if k == "0" and modo == "def" then
-    R.def_real = not R.def_real
-    if not R.def_real then R.def_f = nil end
+    R.toggle_def()
     return true
   end
   return false

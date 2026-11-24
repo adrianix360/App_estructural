@@ -138,6 +138,13 @@ Restricciones: sin variables globales; módulos devuelven tabla; nada de `io`/`o
 - Cache por resultado en coordenadas de barra (x local, valor): la cámara solo interviene al pintar, sin crear tablas (≈ 0.4 KB de basura por `on.paint`).
 - `ui.cas.ecuacion`: `math.evalStr("expand(...)")` dentro de `pcall`; solo se acepta si coincide numéricamente en 2 puntos con `core.poly`; se indica el motor ("CAS" o "propio"). Texto de los polinomios: `poly.tostring_sig` (4 cifras significativas).
 
+### 6.2 Pulido de interfaz (v1.0)
+
+- `ui.unidades` (§4.1): `kN-m`, `N-m`, `tf-m`; cfg `unidades` y `def_real` en `on.save`. Menú **Ajustes** (Unidades, Rejilla, Snap, E/A/I); tecla `q` cicla.
+- **Dividir barra** (`ED.dividir_barra(m, e, a)`): clic en el interior de una barra con Nodo/Barra. Primera mitad conserva índice y rótula i; la nueva barra va al final con la rótula j. `P`/`M` pasan a la mitad que los contiene (en el corte exacto: carga nodal del nodo nuevo), `w` se recorta interpolando w1/w2, `T` se copia. Una barra `cercha` pasa a `portico` con extremos articulados (equivalente).
+- **Cargas**: `ED.reemplazar_carga_barra`, `ED.borrar_carga_barra`; lista por barra (Agregar / Editar / Borrar) y tipo `T` (`ΔT` junto a la barra). Carga nodal: Editar / Borrar.
+- Etiquetas de carga apiladas sin solape (lista de rectángulos por cuadro); recuadro de valor al apuntar en la esquina más alejada del cursor sin tapar etiquetas; selector Real / Ampliada de la deformada (`R.sel_def`, `R.toggle_def`); ecuaciones con coeficientes escalados a las unidades (x en m) y `N(x) = 0` omitido.
+
 ## 7. Verificación
 
 `tests/test_solver.lua` (casos analíticos de PROMPT §7 con error relativo < 1e-6) y

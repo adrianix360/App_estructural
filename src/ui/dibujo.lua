@@ -5,6 +5,7 @@
 local V = require("ui.vista")
 local ED = require("ui.modelo_ed")
 local Res = require("ui.resultados")
+local U = require("ui.unidades")
 
 local P = {}
 
@@ -139,6 +140,38 @@ local function fmtc(v)
     fcache[v] = s; fcount = fcount + 1
   end
   return s
+end
+
+-- etiquetas de cargas con unidades ("10 kN", "5 kN/m"): una cache por (cantidad, valor); se vacia al
+-- cambiar de sistema de unidades
+local lcache, lcount, lver = {}, 0, -1
+local function lbl(cant, v, sin_unidad)
+  if lver ~= U.ver then lcache, lcount, lver = {}, 0, U.ver end
+  local key = sin_unidad and (cant .. "#") or cant
+  local t = lcache[key]
+  if not t then t = {}; lcache[key] = t end
+  local s = t[v]
+  if not s then
+    s = U.num(U.de_interna(cant, v), 3)
+    if not sin_unidad then s = s .. " " .. U.etiqueta(cant) end
+    if lcount > 300 then lcache, lcount = {}, 0; t = {}; lcache[key] = t end
+    t[v] = s; lcount = lcount + 1
+  end
+  return s
+end
+
+-- Rectangulos de etiquetas ya colocadas en este cuadro (anti-solape de cargas y numeros de nodo)
+local LBX, nlbx = {}, 0
+local LTT, LTA, LTB, nltt = {}, {}, {}, 0     -- textos de carga ya colocados y su ancla (evita duplicados)
+local function lb_libre(x0, y0, x1, y1)
+  for i = 1, nlbx, 4 do
+    if x0 < LBX[i + 2] and x1 > LBX[i] and y0 < LBX[i + 3] and y1 > LBX[i + 1] then return false end
+  end
+  return true
+end
+local function lb_poner(x0, y0, x1, y1)
+  LBX[nlbx + 1], LBX[nlbx + 2], LBX[nlbx + 3], LBX[nlbx + 4] = x0, y0, x1, y1
+  nlbx = nlbx + 4
 end
 
 -- ------------------------------------------------------------ rejilla y ejes
@@ -314,15 +347,49 @@ local function dir_mundo(dir, sg, cb, sb)
 end
 
 local function etiqueta_carga(gc, s, tx, ty, dx, dy)
-  -- texto 7 pt centrado, desplazado del extremo de la flecha en el sentido contrario a la fuerza
+  -- texto 7 pt centrado, desplazado del extremo de la flecha en el sentido contrario a la fuerza.
+  -- Si choca con otra etiqueta ya colocada se apila: sigue alejandose del extremo (paso de 10 px) y
+  -- luego prueba a los lados.
+  for i = 1, nltt do
+    -- mismo texto junto a la misma ancla (p. ej. w en el corte de dos barras): se dibuja una sola vez
+    if LTT[i] == s and abs(LTA[i] - tx) < 8 and abs(LTB[i] - ty) < 8 then return end
+  end
+  nltt = nltt + 1
+  LTT[nltt], LTA[nltt], LTB[nltt] = s, tx, ty
   fuente(gc, "r", 7)
   local w = gc:getStringWidth(s)
   local off = abs(dx) * (w / 2 + 3) + abs(dy) * 8
   local cx, cy = tx - dx * off, ty - dy * off
-  gc:drawString(s, r(cx - w / 2), r(cy - 5), "top")
+  local R = V.rect
+  local bx0, by0
+  for q = 0, 12 do
+    local ex, ey = 0, 0
+    if q > 0 then
+      local fase = (q - 1) % 3          -- 0: mas lejos, 1: lado +, 2: lado -
+      local paso = floor((q - 1) / 3) + 1
+      local sx, sy = -dx, -dy           -- hacia fuera
+      local lx, ly = -sy, sx            -- perpendicular
+      local d = (abs(dy) > 0.5) and 10 or (w + 3)
+      local dl = (abs(dy) > 0.5) and (w + 3) or 10
+      if fase == 0 then ex, ey = sx * d * paso, sy * d * paso
+      elseif fase == 1 then ex, ey = lx * dl * paso, ly * dl * paso
+      else ex, ey = -lx * dl * paso, -ly * dl * paso end
+    end
+    local bx, by = floor(cx + ex - w / 2 + 0.5), floor(cy + ey - 5 + 0.5)
+    if bx < R.x + 1 then bx = R.x + 1 elseif bx + w > R.x + R.w - 1 then bx = R.x + R.w - 1 - w end
+    if by < R.y + 1 then by = R.y + 1 elseif by + 10 > R.y + R.h - 1 then by = R.y + R.h - 11 end
+    if q == 0 then bx0, by0 = bx, by end
+    if lb_libre(bx - 1, by, bx + w + 1, by + 10) then
+      lb_poner(bx - 1, by, bx + w + 1, by + 10)
+      gc:drawString(s, bx, by, "top")
+      return
+    end
+  end
+  lb_poner(bx0 - 1, by0, bx0 + w + 1, by0 + 10)
+  gc:drawString(s, bx0, by0, "top")
 end
 
-local function momento(gc, cx, cy, rad, antihorario, s)
+local function momento(gc, cx, cy, rad, antihorario, s, debajo)
   gc:drawArc(r(cx - rad), r(cy - rad), r(2 * rad), r(2 * rad), 30, 270)
   -- punta en el extremo hacia el que gira
   local ang, tx, ty, dx, dy
@@ -336,7 +403,13 @@ local function momento(gc, cx, cy, rad, antihorario, s)
     dx, dy = sin(ang), cos(ang)
   end
   punta(gc, tx, ty, dx, dy, 6)
-  if s then txt(gc, s, cx - rad - 2, cy - 4, 7, "r") end
+  if s then
+    -- a la izquierda del arco; a la derecha si no cabe junto al borde del lienzo
+    fuente(gc, "r", 7)
+    if debajo then etiqueta_carga(gc, s, cx, cy + rad, 0, -1)
+    elseif cx - rad - 5 - gc:getStringWidth(s) < V.rect.x + 2 then etiqueta_carga(gc, s, cx + rad - 1, cy + 1, -1, 0)
+    else etiqueta_carga(gc, s, cx - rad + 1, cy + 1, 1, 0) end
+  end
 end
 
 local function carga_nodal(gc, i, c)
@@ -344,15 +417,16 @@ local function carga_nodal(gc, i, c)
   if c.fx and c.fx ~= 0 then
     local sg = c.fx > 0 and 1 or -1
     flecha(gc, px - sg * 30, py, px - sg * 5, py)
-    etiqueta_carga(gc, fmtc(c.fx), px - sg * 30, py, sg, 0)
+    -- debajo de la flecha, centrada: no cae sobre la barra ni sobre las cargas distribuidas
+    etiqueta_carga(gc, lbl("fuerza", c.fx), px - sg * 17, py, 0, -1)
   end
   if c.fy and c.fy ~= 0 then
     local sg = c.fy > 0 and 1 or -1       -- +: hacia arriba
     flecha(gc, px, py + sg * 30, px, py + sg * 5)
-    etiqueta_carga(gc, fmtc(c.fy), px, py + sg * 30, 0, -sg)
+    etiqueta_carga(gc, lbl("fuerza", c.fy), px, py + sg * 30, 0, -sg)
   end
   if c.mz and c.mz ~= 0 then
-    momento(gc, px, py, 13, c.mz > 0, fmtc(c.mz))
+    momento(gc, px, py, 13, c.mz > 0, lbl("momento", c.mz))
   end
 end
 
@@ -372,10 +446,21 @@ local function cargas_barra(gc, m, e)
       local dx, dy = dir_mundo(c.dir, c.p >= 0 and 1 or -1, cb, sb)
       local sdx, sdy = dx, -dy
       flecha(gc, bx - sdx * 28, by - sdy * 28, bx, by)
-      etiqueta_carga(gc, fmtc(c.p), bx - sdx * 28, by - sdy * 28, sdx, sdy)
+      etiqueta_carga(gc, lbl("fuerza", c.p), bx - sdx * 28, by - sdy * 28, sdx, sdy)
     elseif c.t == "M" then
       local f = min(1, max(0, c.a / L))
-      momento(gc, x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, 11, c.m > 0, fmtc(c.m))
+      momento(gc, x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, 11, c.m > 0, lbl("momento", c.m), true)
+    elseif c.t == "T" then
+      -- etiqueta corta "ΔT" junto a la barra, hacia arriba en pantalla
+      local ux, uy = (x2 - x1), (y2 - y1)
+      local lp = sqrt(ux * ux + uy * uy)
+      if lp > 12 then
+        ux, uy = ux / lp, uy / lp
+        local nx, ny = uy, -ux
+        if ny > 0 or (ny == 0 and nx > 0) then nx, ny = -nx, -ny end
+        local mx, my = (x1 + x2) / 2 + nx * 6, (y1 + y2) / 2 + ny * 6
+        etiqueta_carga(gc, "ΔT", mx, my, -nx, -ny)
+      end
     elseif c.t == "w" then
       local a, bb = min(c.a, L), min(c.b, L)
       local wmax = max(abs(c.w1), abs(c.w2))
@@ -402,10 +487,10 @@ local function cargas_barra(gc, m, e)
         end
         if c.w1 == c.w2 then
           local mx, my = (tx1 + ptx) / 2, (ty1 + pty) / 2
-          etiqueta_carga(gc, fmtc(c.w1), mx, my, sdx1, sdy1)
+          etiqueta_carga(gc, lbl("dist", c.w1), mx, my, sdx1, sdy1)
         else
-          if c.w1 ~= 0 then etiqueta_carga(gc, fmtc(c.w1), tx1, ty1, sdx1, sdy1) end
-          if c.w2 ~= 0 then etiqueta_carga(gc, fmtc(c.w2), ptx, pty, psx, psy) end
+          if c.w1 ~= 0 then etiqueta_carga(gc, lbl("dist", c.w1), tx1, ty1, sdx1, sdy1) end
+          if c.w2 ~= 0 then etiqueta_carga(gc, lbl("dist", c.w2), ptx, pty, psx, psy) end
         end
       end
     end
@@ -521,7 +606,22 @@ local function modelo(gc, H)
     end
     local ox = (mx > 0) and 4 or -4
     local oy = (my < 0) and -12 or 2
-    txt(gc, tostring(i), px + ox, py + oy, 7, (mx > 0) and "l" or "r")
+    local si = tostring(i)
+    fuente(gc, "r", 7)
+    local wn = gc:getStringWidth(si)
+    local x0 = (mx > 0) and (px + ox) or (px + ox - wn)
+    if not lb_libre(x0, py + oy, x0 + wn, py + oy + 10) then
+      -- prueba las otras tres diagonales
+      for q = 1, 4 do
+        local cx2 = (q % 2 == 1) and 4 or -4
+        local cy2 = (q <= 2) and -12 or 2
+        local xx = (cx2 > 0) and (px + cx2) or (px + cx2 - wn)
+        if lb_libre(xx, py + cy2, xx + wn, py + cy2 + 10) then ox, oy, mx = cx2, cy2, (cx2 > 0) and 1 or -1; break end
+      end
+    end
+    x0 = (mx > 0) and (px + ox) or (px + ox - wn)
+    lb_poner(x0, py + oy, x0 + wn, py + oy + 10)
+    txt(gc, si, px + ox, py + oy, 7, (mx > 0) and "l" or "r")
   end
 end
 
@@ -531,12 +631,18 @@ local function guia_cursor(gc, H)
   local m = ED.m
   if H.tool == "barra" and H.barra_a and m.nodos[H.barra_a] then
     setc(gc, C.guia); pen(gc, "thin", "dotted")
-    ln(gc, NX[H.barra_a], NY[H.barra_a], hv.sx, hv.sy)
+    if hv.div then ln(gc, NX[H.barra_a], NY[H.barra_a], hv.dx, hv.dy)
+    else ln(gc, NX[H.barra_a], NY[H.barra_a], hv.sx, hv.sy) end
     pen(gc, "thin", "smooth")
   end
   if H.tool == "nodo" or H.tool == "barra" then
     setc(gc, C.guia)
     local x, y = r(hv.sx), r(hv.sy)
+    if hv.div then
+      -- sobre una barra: el nodo nuevo la dividira en este punto
+      x, y = r(hv.dx), r(hv.dy)
+      anillo(gc, x, y, 4)
+    end
     gc:drawLine(x - 6, y, x - 2, y); gc:drawLine(x + 2, y, x + 6, y)
     gc:drawLine(x, y - 6, x, y - 2); gc:drawLine(x, y + 2, x, y + 6)
   end
@@ -611,11 +717,12 @@ local function barra_herramientas(gc, H)
       setc(gc, tc)
       txt(gc, b.txt, b.x + b.w / 2, b.y + 4, 9, "c", (activo or #b.txt <= 2) and "b" or "r")
     else
-      icono(gc, b.id, b.x + 10, b.y + b.h / 2, gris)
+      icono(gc, b.id, b.x + (b.tecla and 9 or 10), b.y + b.h / 2, gris)
     end
     if b.tecla then
+      -- atajo en la esquina inferior derecha, fuera del area del icono (que ocupa x+1..x+17)
       setc(gc, activo and C.tb_act_b or C.etiq)
-      txt(gc, b.tecla, b.x + b.w - 3, b.y + b.h - 10, 7, "r", activo and "b" or "r")
+      txt(gc, b.tecla, b.x + b.w - 2, b.y + b.h - 9, 7, "r", activo and "b" or "r")
     end
   end
 end
@@ -658,6 +765,7 @@ local PRIM = { setc = setc, pen = pen, ln = ln, txt = txt, r = r, disco = disco,
 
 function P.pintar(gc, H)
   fcur_s, fcur_z = nil, nil
+  nlbx, nltt = 0, 0
   setc(gc, C.fondo); gc:fillRect(0, 0, WW, HH)
   if not Res.pantalla_completa() then
     rejilla(gc)

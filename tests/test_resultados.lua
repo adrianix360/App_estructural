@@ -510,6 +510,170 @@ check(sin_error("modelo grande"), "paint con modelo grande")
 H.salir_resultados()
 H.deshacer()
 
+-- =================================================================== v1.0: unidades en los resultados
+print("-- unidades en resultados")
+local U = env.require("ui.unidades")
+ir("Viga apoyada"); key("m")
+mock.move(px(3), py(0))
+check(shown("M=45 kN·m"), "kN-m: M=45 kN·m")
+H.set_unidades("N-m")
+check(shown("M=45000 N·m"), "N-m: el mismo punto muestra M=45000 N·m")
+H.msg = nil     -- el aviso "Unidades: ..." tapa la barra de estado hasta la siguiente accion
+check(shown("M=45000 N·m | δ="), "N-m: tambien en la barra de estado")
+check(shown("max 45000 N·m"), "maximo del diagrama en N·m")
+near(R.cur.M, 45, "el valor interno sigue en kN·m", 0.05)
+check(shown("δ=0.008437 m"), "flecha en m con el sistema N-m: " .. tostring(R.cur and R.cur.l4))
+H.set_unidades("tf-m")
+check(shown("M=4.589 tf·m"), "tf-m: M=4.589 tf·m")
+H.msg = nil
+check(shown("M=4.589 tf·m | δ=8.437 mm"), "tf-m: barra de estado, flecha en mm")
+png("pol_apuntar_tfm")
+H.set_unidades("kN-m")
+check(shown("M=45 kN·m"), "vuelta a kN-m")
+-- etiquetas del diagrama
+H.set_unidades("N-m")
+mock.move(10, 100); mock.paint()
+check(shown("45000"), "etiqueta del maximo del diagrama en N·m")
+H.set_unidades("kN-m")
+-- reacciones
+key("r")
+check(shown("Ry=30 kN"), "reacciones en kN")
+H.set_unidades("N-m"); check(shown("Ry=30000 N") and shown("[N, N·m]"), "reacciones en N")
+H.set_unidades("tf-m"); check(shown("Ry=3.059 tf") and shown("[tf, tf·m]"), "reacciones en tf")
+H.set_unidades("kN-m")
+-- nodo
+mock.move(px(0), py(0))
+check(shown("Ry=30 kN"), "nodo: reaccion en kN")
+H.set_unidades("N-m"); check(shown("Ry=30000 N"), "nodo: reaccion en N")
+H.set_unidades("kN-m")
+-- tabla
+key("t")
+check(shown("ux [mm]") and shown("Rx [kN]") and shown("M [kN·m]"), "tabla en kN-m")
+H.set_unidades("N-m")
+check(shown("ux [m]") and shown("Rx [N]") and shown("M [N·m]") and shown("rz [rad]"), "tabla en N-m")
+H.set_unidades("tf-m")
+check(shown("Ry [tf]") and shown("M [tf·m]"), "tabla en tf-m")
+H.set_unidades("kN-m")
+-- ecuaciones: x en m, coeficientes escalados
+key("e")
+check(shown("M(x) = -5*x^2+30*x"), "ecuaciones kN-m: M = -5x^2+30x")
+check(shown("N,V en kN") and shown("M en kN·m") and shown("y en mm"), "encabezado con unidades (kN-m)")
+check(not shown("N(x) ="), "N(x) = 0 se omite en la viga")
+H.set_unidades("N-m")
+check(shown("M(x) = -5000*x^2+30000*x"), "ecuaciones N-m: M = -5000x^2+30000x")
+check(shown("V(x) = 30000-10000*x") or shown("V(x) = -10000*x+30000"), "V(x) en N")
+check(shown("N,V en N") and shown("M en N·m") and shown("y en m"), "encabezado con unidades (N-m)")
+dentro("ecuaciones N-m")
+png("pol_ecuaciones_Nm")
+-- los valores de las ecuaciones coinciden con E.eval (convertidos)
+do
+  local rr = S.resolver(ED.m)
+  local _, Vx, Mx = EE.eval(rr, 1, 2)
+  local q = EE.ecuaciones(rr, 1)[1]
+  near(P.eval(q.M, 2), Mx, "ecuacion M(2) = E.eval", 1e-9)
+  near(P.eval(P.scale(q.M, 1000), 2), Mx * 1000, "M(2) en N·m", 1e-6)
+end
+H.set_unidades("tf-m")
+check(shown("tf·m") and shown("y en mm"), "ecuaciones en tf-m")
+H.set_unidades("kN-m")
+-- N(x) aparece cuando hay axial (cercha)
+ir("Cercha"); key("e")
+check(shown("N(x) ="), "cercha: N(x) distinto de cero se muestra")
+-- la tabla se rehace al cambiar de unidades sin salir
+ir("Viga apoyada"); key("t")
+H.set_unidades("N-m"); check(shown("Rx [N]"), "tabla se rehace al cambiar de unidades")
+H.set_unidades("kN-m")
+-- leyenda
+H.leyenda(); check(shown("Unidades"), "leyenda menciona las unidades"); key("escape")
+
+-- =================================================================== recuadro de valores
+print("-- recuadro de valores en la esquina opuesta")
+ir("Viga apoyada"); key("m")
+local function caja_ok(label, px_, py_)
+  mock.move(px_, py_); mock.paint()
+  local c = R.caja
+  local cx, cy = c.px, c.py
+  local inside = cx > c.x - 6 and cx < c.x + c.w + 6 and cy > c.y - 6 and cy < c.y + c.h + 6
+  check(not inside, label .. ": el recuadro no tapa el punto apuntado")
+  return c
+end
+do
+  local c1 = caja_ok("cursor a la izquierda", px(0.8), py(0))
+  check(c1.x + c1.w / 2 > mock.W / 2, "cursor a la izquierda: recuadro en el lado derecho (x=" .. c1.x .. ")")
+  local c2 = caja_ok("cursor a la derecha", px(5.2), py(0))
+  check(c2.x + c2.w / 2 < mock.W / 2, "cursor a la derecha: recuadro en el lado izquierdo (x=" .. c2.x .. ")")
+  dentro("recuadro opuesto")
+  -- no cubre las etiquetas ya dibujadas
+  mock.move(px(3), py(0)); mock.paint()
+  local c3 = R.caja
+  for _, t in ipairs(mock.screen_text()) do
+    if t.text == "45" and t.size == 7 then
+      local solapa = t.x < c3.x + c3.w and t.x + t.w > c3.x and t.y < c3.y + c3.h and t.y + 10 > c3.y
+      check(not solapa, "el recuadro no tapa la etiqueta del maximo del diagrama")
+    end
+  end
+end
+key("d")
+do
+  mock.move(px(1), py(0)); mock.paint()
+  local c = R.caja
+  local sd = R.sel_def
+  local solapa = c.x < sd.x + sd.w and c.x + c.w > sd.x and c.y < sd.y + sd.h and c.y + c.h > sd.y
+  check(not solapa, "el recuadro no tapa el selector de deformada")
+end
+
+-- =================================================================== selector de deformada
+print("-- selector de deformada")
+ir("Viga apoyada"); key("d")
+check(shown("Real") and shown("Ampliada x"), "selector Real / Ampliada visible")
+check(not R.def_real, "por omision ampliada")
+do
+  local sd = R.sel_def
+  mock.click(sd.xr + 3, sd.y + 3)
+  check(R.def_real, "clic en Real activa la deformada real")
+  check(shown("(real)"), "y la cabecera lo dice")
+  mock.paint()
+  sd = R.sel_def
+  mock.click(sd.xa + 3, sd.y + 3)
+  check(not R.def_real, "clic en Ampliada vuelve a la ampliada")
+  check(shown("Ampliada x"), "con su factor")
+end
+-- el boton Def, ya activo, alterna
+do
+  local bdef
+  for _, b in ipairs(H.botones) do if b.id == "r_def" then bdef = b end end
+  mock.click(bdef.x + 4, bdef.y + 4)
+  check(R.def_real, "clic en el boton Def activo alterna a real")
+  mock.click(bdef.x + 4, bdef.y + 4)
+  check(not R.def_real, "y otra vez a ampliada")
+end
+H.toggle_def(); check(R.def_real, "H.toggle_def (menu Vista) alterna"); H.toggle_def()
+mock.move(10, 100); H.msg = nil
+check(shown("0 alterna"), "la barra de estado explica la tecla 0")
+dentro("selector de deformada")
+png("pol_deformada_selector")
+-- el selector no aparece fuera de la vista de deformada
+key("m"); check(not shown("Ampliada x"), "sin selector fuera de la deformada")
+-- unidades y selector se conservan al guardar
+H.set_unidades("tf-m"); R.def_real = true
+local sv2 = mock.save()
+eq(sv2.cfg.unidades, "tf-m", "cfg.unidades"); eq(sv2.cfg.def_real, true, "cfg.def_real")
+H.set_unidades("kN-m"); R.def_real = false
+mock.restore(sv2)
+eq(U.actual, "tf-m", "restaura unidades"); eq(R.def_real, true, "restaura deformada real")
+H.set_unidades("kN-m"); R.def_real = false
+
+-- =================================================================== carga termica en la interfaz
+print("-- carga termica: se guarda, dibuja y resuelve")
+ir("Viga apoyada")
+H.salir_resultados()
+ED.agregar_carga_barra(ED.m, 1, { t = "T", du = 0, dg = 30, alfa = 1.2e-5, h = 0.3 })
+ED.cambio()
+check(shown("ΔT"), "etiqueta ΔT en el lienzo")
+key("r")
+check(sin_error("resolver con T"), "paint con T y resultados")
+H.salir_resultados()
+
 -- =================================================================== robustez
 print("-- robustez")
 ir("Portal")

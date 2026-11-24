@@ -12,11 +12,19 @@ de inmediato.
   nudos rígidos o articulados, cerchas.
 - **Apoyos**: articulado, rodillo (X o Y), empotrado, resorte (traslacional/rotacional), asentamientos.
 - **Cargas**: nodales (Fx, Fy, Mz), puntual en barra, distribuida uniforme, trapezoidal/triangular (también
-  parcial), momento en barra. Direcciones global X/Y, perpendicular y axial.
+  parcial), momento en barra y **temperatura** (uniforme `du` y gradiente `dg`, con α y canto h). Direcciones
+  global X/Y, perpendicular y axial. Cada barra o nodo tiene una **lista de cargas** para agregar, editar o
+  borrar una por una; las etiquetas de varias cargas se apilan sin encimarse.
+- **Dividir barras**: con Nodo o Barra, un clic en el interior de una barra inserta un nodo (con snap a lo largo
+  de la barra) y la parte en dos, repartiendo cargas y conservando propiedades y rótulas; deshacer lo revierte en un paso.
+- **Unidades**: kN-m (omisión), N-m (SI) o tf-m, en menú *Ajustes → Unidades* o con `q`. Se aplican a todos los
+  diálogos, etiquetas, reacciones, diagramas, valor al apuntar, tabla y ecuaciones. El modelo siempre se guarda en kN, m.
 - **Clasificación** en vivo: isostática, hiperestática (con grado) o inestable, con mensajes en español.
 - **Resultados**: reacciones, diagramas N, V, M (momento del lado traccionado), deformada con escala ajustable o
   real, **valor al apuntar** (N, V, M, δ en cualquier punto), máximos y ceros, tabla de desplazamientos,
-  reacciones y fuerzas de extremo, y **ecuaciones por tramo** V(x), M(x), θ(x), y(x) (CAS si está disponible).
+  reacciones y fuerzas de extremo, y **ecuaciones por tramo** V(x), M(x), θ(x), y(x) (CAS si está disponible; N(x) solo si
+  no es cero), con el selector **Real / Ampliada** de la deformada. El recuadro de valores se coloca en la esquina
+  opuesta al cursor para no tapar etiquetas.
 - Deshacer/rehacer, ejemplos, biblioteca de modelos guardados en el documento.
 
 | | | |
@@ -41,18 +49,19 @@ de inmediato.
 | Tecla | Modelado | Tecla | Resultados |
 |---|---|---|---|
 | `s` | Seleccionar / mover (arrastre), `del` borra, `enter` edita | `r` `n` `v` `m` `d` | Reacciones, N, V, M, deformada |
-| `n` | Nodo (snap a la rejilla) | `t` / `e` | Tabla / ecuaciones por tramo |
-| `b` | Barra (encadena clics) | `+` `-` | Escala del diagrama o de la deformada |
-| `a` / `c` | Apoyo / carga | `0` | Deformada real ↔ ampliada |
+| `n` | Nodo (snap a la rejilla); clic sobre una barra la **divide** | `t` / `e` | Tabla / ecuaciones por tramo |
+| `b` | Barra (encadena clics); clic sobre una barra la divide | `+` `-` | Escala del diagrama o de la deformada |
+| `a` / `c` | Apoyo / carga (`enter` sobre la barra: lista de cargas) | `0` | Deformada real ↔ ampliada (también el selector en pantalla) |
 | `x` | Coordenadas exactas | flechas | Recorrer la barra / cambiar de barra |
 | `u` / `y` | Deshacer / rehacer | `l` o `?` | Leyenda de signos |
 | `e` / `+` `-` | Encuadrar / zoom | `esc` | Volver a modelar |
+| `q` | Cambiar unidades (kN-m → N-m → tf-m) | `g` `k` `p` | Rejilla, snap, propiedades globales |
 
-El menú `menu` tiene Archivo (ejemplos, guardar, abrir), Herramientas, Vista (rejilla y snap), Propiedades globales y Ayuda.
+El menú `menu` tiene Archivo (ejemplos, guardar, abrir), Herramientas (incluye deshacer/rehacer), Vista (encuadre, zoom, deformada real/ampliada), Ajustes (unidades, rejilla, snap y propiedades globales) y Ayuda.
 
 ## Convenciones
 
-Unidades internas kN, m, rad. Los diálogos usan E en GPa, A en cm² e I en cm⁴. Ejes globales: X a la derecha, Y hacia arriba,
+Unidades internas kN, m, rad. Los diálogos usan las unidades del sistema elegido (por omisión kN-m: E en GPa, A en cm², I en cm⁴, desplazamientos en mm). Ejes globales: X a la derecha, Y hacia arriba,
 giros antihorarios positivos. N positivo = tracción; M se dibuja del lado traccionado; `V = dM/dx`. Detalle en
 [docs/arquitectura.md](docs/arquitectura.md) §3.
 

@@ -69,7 +69,7 @@ check(mock.toolpalette_menu ~= nil, "toolpalette registrado")
 do
   local titulos = {}
   for _, m in ipairs(mock.toolpalette_menu) do titulos[#titulos + 1] = m[1] end
-  eq(table.concat(titulos, ","), "Archivo,Herramientas,Vista,Propiedades globales,Ayuda", "menus")
+  eq(table.concat(titulos, ","), "Archivo,Herramientas,Vista,Ajustes,Ayuda", "menus")
   local n_items = 0
   for _, m in ipairs(mock.toolpalette_menu) do n_items = n_items + #m - 1 end
   check(n_items <= 30 and #mock.toolpalette_menu <= 15, "limites de toolpalette (<=30 items)")
@@ -159,21 +159,23 @@ local c = modelo().barras[1].cargas[1]
 check(c and c.t == "w" and c.w1 == -10 and c.w2 == -10 and c.dir == "GY", "w = -10 GY")
 near(c.a, 0, "a=0"); near(c.b, 6, "b=L")
 -- puntual donde se hizo clic
-clic(2, 0); key("1")
+clic(2, 0)
+check(shown("Cargas de la barra 1"), "con cargas: aparece la lista de cargas")
+key("1"); key("1")               -- Agregar > Puntual
 check(shown("desde nodo"), "formulario de puntual")
 key("down"); typed("25"); key("enter")
 local p = modelo().barras[1].cargas[2]
 check(p and p.t == "P" and p.p == -25 and p.dir == "GY", "P = -25 GY (abajo)")
 near(p.a, 2, "a tomado del clic (snap)")
 -- momento y trapezoidal
-clic(3, 0); key("4"); key("enter")
+clic(3, 0); key("1"); key("4"); key("enter")
 eq(modelo().barras[1].cargas[3].t, "M", "momento")
-clic(3, 0); key("3")
+clic(3, 0); key("1"); key("3")
 key("down"); key("down"); key("down"); typed("12"); key("enter")
 local tz = modelo().barras[1].cargas[4]
 check(tz and tz.t == "w" and tz.w1 == 0 and tz.w2 == -12, "trapezoidal 0 -> -12")
 -- error de validacion mantiene el dialogo
-clic(3, 0); key("1")
+clic(3, 0); key("1"); key("1")
 typed("9"); key("enter")
 check(D.activo() ~= nil and shown("posicion"), "posicion fuera de la barra: mensaje y dialogo abierto")
 key("escape")
@@ -187,7 +189,7 @@ check(modelo().nodos[2].carga and modelo().nodos[2].carga.fy == -15 and modelo()
 dentro("viga cargada")
 png("03_viga_cargada")
 -- borrar cargas
-clic(3, 0); key("5")
+clic(3, 0); key("6")
 eq(#modelo().barras[1].cargas, 0, "borrar cargas de la barra")
 H.deshacer()
 eq(#modelo().barras[1].cargas, 4, "deshacer restaura las cargas")
@@ -498,6 +500,509 @@ local m1 = gcc("count")
 local por_paint = (m1 - m0) / 100
 print(string.format("   basura por on.paint (gc nulo, cercha): %.2f KB", por_paint))
 check(por_paint < 3, "on.paint genera poca basura: " .. por_paint .. " KB")
+
+-- =================================================================== v1.0: pulido de interfaz
+local U = env.require("ui.unidades")
+local Res = env.require("ui.resultados")
+local S = env.require("core.solver")
+local EE = env.require("core.esfuerzos")
+local function sin_resultados() if Res.modo then H.salir_resultados() end end
+
+-- ------------------------------------------------------------------ dividir barra (UI)
+print("-- dividir barra: clics")
+sin_resultados()
+nuevo()
+clic(0, 0); clic(6, 0); key("escape")
+do
+  local b1 = modelo().barras[1]
+  b1.E, b1.A, b1.I, b1.rot_i, b1.rot_j = 123e6, 0.02, 3e-4, true, true
+  ED.agregar_carga_barra(modelo(), 1, { t = "P", a = 1, p = -10, dir = "GY" })
+  ED.agregar_carga_barra(modelo(), 1, { t = "P", a = 4.5, p = -20, dir = "GY" })
+  ED.agregar_carga_barra(modelo(), 1, { t = "w", a = 0, b = 6, w1 = -2, w2 = -8, dir = "GY" })
+  ED.agregar_carga_barra(modelo(), 1, { t = "T", du = 20, dg = 10, alfa = 1.2e-5, h = 0.3 })
+  ED.agregar_carga_barra(modelo(), 1, { t = "M", a = 3, m = 7 })
+end
+H.set_tool("nodo")
+mock.move(px(3.2), py(0))
+check(H.hover.div, "sobre una barra con Nodo se anuncia la division")
+shown("x")
+ED.reiniciar_historial()
+local n_undo0 = ED.n_undo()
+clic(3.2, 0)
+do
+  local mm = modelo()
+  eq(#mm.nodos, 3, "dividir: nodo nuevo")
+  eq(#mm.barras, 2, "dividir: dos barras")
+  near(mm.nodos[3].x, 3, "snap a lo largo de la barra (3.2 -> 3.0)"); near(mm.nodos[3].y, 0, "nodo sobre la barra")
+  eq(mm.barras[1].ni, 1, "primera mitad: ni"); eq(mm.barras[1].nj, 3, "primera mitad: nj = nodo nuevo")
+  eq(mm.barras[2].ni, 3, "segunda mitad: ni = nodo nuevo"); eq(mm.barras[2].nj, 2, "segunda mitad: nj original")
+  eq(mm.barras[1].rot_i, true, "rotula i queda en la primera"); eq(mm.barras[1].rot_j, false, "primera: j rigido")
+  eq(mm.barras[2].rot_i, false, "segunda: i rigido"); eq(mm.barras[2].rot_j, true, "rotula j pasa a la segunda")
+  near(mm.barras[2].E, 123e6, "E copiado", 1); near(mm.barras[2].A, 0.02, "A copiada"); near(mm.barras[2].I, 3e-4, "I copiada", 1e-12)
+  eq(mm.barras[2].tipo, "portico", "tipo copiado")
+  eq(H.sel and H.sel.t, "nodo", "queda seleccionado el nodo nuevo")
+  -- cargas
+  local c1, c2 = mm.barras[1].cargas, mm.barras[2].cargas
+  local function cuenta(cs, t) local n = 0 for _, c in ipairs(cs) do if c.t == t then n = n + 1 end end return n end
+  eq(cuenta(c1, "P"), 1, "P(a=1) a la primera"); eq(cuenta(c2, "P"), 1, "P(a=4.5) a la segunda")
+  for _, c in ipairs(c2) do if c.t == "P" then near(c.a, 1.5, "P desplazada a=4.5-3") end end
+  eq(cuenta(c1, "M") + cuenta(c2, "M"), 0, "M(a=3) justo en el corte: ya no queda en ninguna barra ...")
+  check(mm.nodos[3].carga ~= nil and math.abs(mm.nodos[3].carga.mz - 7) < 1e-9, "... sino como momento nodal del nodo nuevo")
+  eq(cuenta(c1, "T"), 1, "T en la primera"); eq(cuenta(c2, "T"), 1, "T en la segunda")
+  for _, c in ipairs(c1) do if c.t == "w" then near(c.a, 0, "w1 a"); near(c.b, 3, "w1 b"); near(c.w1, -2, "w1 w1"); near(c.w2, -5, "w1 w2 interpolado") end end
+  for _, c in ipairs(c2) do if c.t == "w" then near(c.a, 0, "w2 a"); near(c.b, 3, "w2 b"); near(c.w1, -5, "w2 w1 interpolado"); near(c.w2, -8, "w2 w2") end end
+end
+eq(ED.n_undo() - n_undo0, 1, "dividir es UN solo paso de deshacer")
+H.deshacer()
+eq(#modelo().nodos, 2, "deshacer: sin nodo nuevo"); eq(#modelo().barras, 1, "deshacer: una barra")
+eq(#modelo().barras[1].cargas, 5, "deshacer: cargas intactas"); eq(modelo().barras[1].rot_j, true, "deshacer: rotulas")
+H.rehacer()
+eq(#modelo().barras, 2, "rehacer divide otra vez")
+H.deshacer()
+-- clic cerca de un nodo: no divide, selecciona el nodo
+clic(0.1, 0)
+eq(#modelo().nodos, 2, "clic junto a un nodo no divide")
+-- un punto interior fuera de la tolerancia del nodo, con snap 0.5
+V.fijar_snap(0)
+clic(0.4, 0)
+eq(#modelo().nodos, 3, "sin snap: divide en el punto del clic")
+near(modelo().nodos[3].x, 0.4, "x libre", 0.02)
+H.deshacer()
+V.fijar_snap(0.5)
+-- Barra: un clic en el interior de una barra parte en dos y encadena
+H.set_tool("barra")
+clic(0, 3)
+clic(3, 0)
+do
+  local mm = modelo()
+  eq(#mm.nodos, 4, "Barra: nodo A y nodo de division"); eq(#mm.barras, 3, "Barra: dos mitades y la barra nueva")
+  check(ED.barra_existe(mm, 3, 4) or ED.barra_existe(mm, 4, 3), "Barra: une A con el nodo de division")
+end
+key("escape")
+-- no se puede unir A con una barra que ya parte de A
+H.set_tool("barra")
+clic(0, 0)
+clic(1.5, 0)
+check(shown("ya parte del nodo A"), "Barra: no divide la barra que sale del nodo A")
+key("escape")
+
+-- ---------------------------------------------------- dividir barra: equivalencia numerica
+print("-- dividir barra: equivalencia numerica")
+local function comparar(m0, e, a, etq, con_T)
+  local m1 = ED.copiar(m0)
+  local ok, e2 = ED.dividir_barra(m1, e, a)
+  check(ok ~= nil, etq .. ": divide (" .. tostring(e2) .. ")")
+  local r0, er0 = S.resolver(m0)
+  local r1, er1 = S.resolver(m1)
+  check(r0 ~= nil, etq .. ": resuelve el original " .. tostring(er0 and er0.msg))
+  check(r1 ~= nil, etq .. ": resuelve el dividido " .. tostring(er1 and er1.msg))
+  if not (r0 and r1) then return end
+  local L = r0.barras[e].L
+  local nuevo_e = #m1.barras
+  local peor = 0
+  for k = 0, 40 do
+    local x = L * k / 40
+    if math.abs(x - a) > 1e-6 then
+      local N0, V0, M0, th0, v0, u0 = EE.eval(r0, e, x)
+      local N1, V1, M1, th1, v1, u1
+      if x < a then N1, V1, M1, th1, v1, u1 = EE.eval(r1, e, x)
+      else N1, V1, M1, th1, v1, u1 = EE.eval(r1, nuevo_e, x - a) end
+      local esc = math.max(1, math.abs(M0), math.abs(V0), math.abs(N0))
+      peor = math.max(peor, math.abs(M1 - M0) / esc, math.abs(V1 - V0) / esc, math.abs(N1 - N0) / esc,
+        math.abs(v1 - v0) / math.max(1e-6, math.abs(v0)), math.abs(u1 - u0) / math.max(1e-9, math.abs(u0)),
+        math.abs(th1 - th0) / math.max(1e-6, math.abs(th0)))
+    end
+  end
+  check(peor < 1e-7, etq .. ": M, V, N, theta, v, u iguales antes y despues (peor " .. string.format("%.2e", peor) .. ")")
+  -- M y desplazamiento justo en el corte (continuos)
+  local _, _, Ma, tha, va = EE.eval(r0, e, a)
+  local _, _, Mb, thb, vb = EE.eval(r1, nuevo_e, 0)
+  check(math.abs(va - vb) <= 1e-7 * math.max(1e-6, math.abs(va)), etq .. ": flecha en el corte")
+  -- reacciones
+  for i, rc in pairs(r0.reac) do
+    local rc1 = r1.reac[i]
+    check(rc1 and math.abs(rc.ry - rc1.ry) <= 1e-7 * math.max(1, math.abs(rc.ry)), etq .. ": reaccion Ry nodo " .. i)
+  end
+end
+do
+  local mm = ED.nuevo()
+  ED.agregar_nodo(mm, 0, 0); ED.agregar_nodo(mm, 6, 0)
+  ED.agregar_barra(mm, 1, 2, ED.PROPS_DEFECTO)
+  ED.set_apoyo_tipo(mm, 1, "empotrado"); ED.set_apoyo_tipo(mm, 2, "rodilloX")
+  ED.agregar_carga_barra(mm, 1, { t = "w", a = 0, b = 4, w1 = -4, w2 = -10, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 2, p = -15, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "M", a = 4.5, m = 8 })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 5, p = 6, dir = "GX" })
+  ED.agregar_carga_barra(mm, 1, { t = "w", a = 3, b = 6, w1 = 2, w2 = 2, dir = "L" })
+  comparar(mm, 1, 2.5, "hiperestatica, corte en tramo con w trapezoidal")
+  comparar(mm, 1, 2, "hiperestatica, corte justo en la P (pasa a nodal)")
+  comparar(mm, 1, 4.5, "hiperestatica, corte justo en M (pasa a nodal)")
+  comparar(mm, 1, 1.234, "hiperestatica, corte arbitrario")
+  -- con carga termica y rotula
+  local mt = ED.copiar(mm)
+  ED.agregar_carga_barra(mt, 1, { t = "T", du = 15, dg = 12, alfa = 1.2e-5, h = 0.4 })
+  mt.barras[1].rot_j = true
+  comparar(mt, 1, 3.3, "con carga termica y rotula j")
+  -- barra inclinada con cargas globales y locales y P en el corte
+  local mi = ED.nuevo()
+  ED.agregar_nodo(mi, 0, 0); ED.agregar_nodo(mi, 4, 3); ED.agregar_nodo(mi, 8, 3)
+  ED.agregar_barra(mi, 1, 2, ED.PROPS_DEFECTO); ED.agregar_barra(mi, 2, 3, ED.PROPS_DEFECTO)
+  ED.set_apoyo_tipo(mi, 1, "empotrado"); ED.set_apoyo_tipo(mi, 3, "articulado")
+  ED.agregar_carga_barra(mi, 1, { t = "w", a = 0, b = 5, w1 = -6, w2 = -6, dir = "GY" })
+  ED.agregar_carga_barra(mi, 1, { t = "P", a = 2, p = -12, dir = "GY" })
+  ED.agregar_carga_barra(mi, 1, { t = "P", a = 2, p = 5, dir = "GX" })
+  ED.agregar_carga_barra(mi, 1, { t = "P", a = 2, p = 4, dir = "L" })
+  ED.agregar_carga_barra(mi, 1, { t = "P", a = 2, p = 3, dir = "LX" })
+  ED.agregar_carga_barra(mi, 1, { t = "w", a = 1, b = 4, w1 = 3, w2 = 9, dir = "L" })
+  comparar(mi, 1, 2.2, "inclinada, corte en tramo")
+  comparar(mi, 1, 2, "inclinada, corte justo en 4 puntuales (P global x/y, L, LX)")
+  -- cercha: la barra dividida pasa a portico con extremos articulados y los desplazamientos no cambian
+  local mc = ED.ejemplo("Cercha")
+  local m2 = ED.copiar(mc)
+  local ok2 = ED.dividir_barra(m2, 1, 1.5)
+  check(ok2 ~= nil, "cercha: divide la barra 1")
+  eq(m2.barras[1].tipo, "portico", "cercha dividida: primera mitad portico")
+  check(m2.barras[1].rot_i and m2.barras[#m2.barras].rot_j and not m2.barras[1].rot_j, "cercha dividida: extremos articulados")
+  local rc0, rc1 = S.resolver(mc), S.resolver(m2)
+  check(rc0 ~= nil and rc1 ~= nil, "cercha dividida se resuelve")
+  if rc0 and rc1 then
+    local peor = 0
+    for i = 1, #mc.nodos do
+      peor = math.max(peor, math.abs(rc0.d[i].ux - rc1.d[i].ux), math.abs(rc0.d[i].uy - rc1.d[i].uy))
+    end
+    check(peor < 1e-9, "cercha dividida: mismos desplazamientos nodales (" .. peor .. ")")
+    local N0 = EE.eval(rc0, 1, 0.5)
+    local N1 = EE.eval(rc1, 1, 0.5)
+    near(N1, N0, "cercha dividida: mismo axial", 1e-7)
+  end
+  -- errores
+  local m3 = ED.copiar(mm)
+  check(ED.dividir_barra(m3, 1, 0) == nil, "no divide en el nodo")
+  check(ED.dividir_barra(m3, 1, 6) == nil, "no divide en el otro nodo")
+  check(ED.dividir_barra(m3, 9, 1) == nil, "barra inexistente")
+  eq(#m3.nodos, 2, "los errores no dejan nodos sueltos")
+end
+
+-- ------------------------------------------------------------ lista de cargas / editar / borrar
+print("-- lista de cargas")
+sin_resultados()
+nuevo()
+clic(0, 0); clic(6, 0); key("escape")
+H.set_tool("carga")
+clic(3, 0)
+check(shown("Carga en barra 1: nueva"), "sin cargas: directo al tipo")
+check(shown("Temperatura"), "el tipo Temperatura existe")
+key("escape")
+ED.agregar_carga_barra(modelo(), 1, { t = "P", a = 2, p = -10, dir = "GY" })
+ED.agregar_carga_barra(modelo(), 1, { t = "w", a = 0, b = 4, w1 = -5, w2 = -8, dir = "GY" })
+ED.agregar_carga_barra(modelo(), 1, { t = "M", a = 5, m = -3 })
+clic(3, 0)
+check(D.activo() ~= nil and shown("Cargas de la barra 1 (3)"), "con cargas: lista")
+check(shown("+ Agregar carga"), "opcion Agregar")
+check(shown("P 10 kN abajo a=2 m"), "descripcion de la puntual")
+check(shown("w 5->8 kN/m 0-4 m abajo"), "descripcion de la trapezoidal")
+check(shown("M 3 kN·m horario a=5 m"), "descripcion del momento")
+check(shown("Borrar todas las cargas"), "opcion Borrar todas")
+png("pol_lista_cargas")
+key("escape")
+-- tipo Temperatura
+clic(3, 0); key("1"); key("5")
+check(D.activo() ~= nil and shown("temperatura") and shown("du uniforme") and shown("alfa") and shown("h canto"), "dialogo de temperatura")
+check(shown("(°C)") and shown("1e-6/°C") and shown("(cm)"), "unidades en el dialogo de temperatura")
+key("enter")    -- du=20 dg=0 -> valido
+do
+  local c = modelo().barras[1].cargas[4]
+  check(c and c.t == "T" and c.du == 20 and c.dg == 0, "T du=20 dg=0")
+  near(c.alfa, 1.2e-5, "alfa por omision 12e-6", 1e-12)
+end
+H.deshacer()
+clic(3, 0); key("1"); key("5")
+typed("20"); key("down"); typed("10"); key("down"); key("down"); typed("40")
+png("pol_dialogo_temperatura")
+key("enter")
+do
+  local c = modelo().barras[1].cargas[4]
+  check(c and c.t == "T" and c.du == 20 and c.dg == 10, "T du=20 dg=10")
+  near(c.h, 0.4, "h = 40 cm = 0.4 m", 1e-12); near(c.alfa, 1.2e-5, "alfa", 1e-12)
+end
+check(shown("ΔT"), "etiqueta ΔT junto a la barra")
+-- temperatura invalida
+clic(3, 0); key("1"); key("5"); typed("0"); key("enter")
+check(D.activo() ~= nil and shown("no puede ser cero"), "du=dg=0 se rechaza")
+key("escape")
+clic(3, 0); key("1"); key("5"); key("down"); typed("5"); key("down"); key("down"); typed("0"); key("enter")
+check(D.activo() ~= nil and shown("canto h"), "dg sin canto se rechaza")
+key("escape")
+eq(#modelo().barras[1].cargas, 4, "los rechazos no agregan cargas")
+-- la lista incluye la T
+clic(3, 0)
+check(shown("T du=20 dg=10 °C"), "descripcion de la temperatura")
+key("escape")
+-- editar la puntual
+ED.reiniciar_historial()
+local nundo = ED.n_undo()
+clic(3, 0); key("2")
+check(shown("P 10 kN abajo") and shown("Editar..."), "submenu de una carga")
+key("1")
+check(D.activo() ~= nil and shown("editar puntual"), "formulario de edicion")
+key("down"); typed("25"); key("down"); key("right")   -- 25 kN, direccion Arriba
+key("enter")
+do
+  local c = modelo().barras[1].cargas[1]
+  check(c.t == "P" and c.p == 25 and c.dir == "GY" and c.a == 2, "puntual editada: +25 GY a=2")
+  eq(#modelo().barras[1].cargas, 4, "editar no agrega ni quita")
+  eq(ED.n_undo() - nundo, 1, "editar = un paso de deshacer")
+end
+H.deshacer()
+near(modelo().barras[1].cargas[1].p, -10, "deshacer restaura la carga")
+-- editar la trapezoidal (abre el formulario trapezoidal con sus valores)
+clic(3, 0); key("3"); key("1")
+check(shown("editar trapezoidal"), "w distinta en extremos: formulario trapezoidal")
+check(shown("w1 en a") and shown("w2 en b"), "campos w1/w2")
+key("escape")
+-- borrar una sola
+clic(3, 0); key("4"); key("2")
+eq(#modelo().barras[1].cargas, 3, "borrar la momento (3a): quedan 3")
+check(D.activo() ~= nil and shown("Cargas de la barra 1 (3)"), "tras borrar se reabre la lista")
+check(not shown("M 3 kN·m"), "el momento ya no aparece")
+key("escape")
+for _, c in ipairs(modelo().barras[1].cargas) do check(c.t ~= "M", "se borro el momento y no otra carga") end
+H.deshacer()
+eq(#modelo().barras[1].cargas, 4, "deshacer el borrado")
+-- Borrar todas desde la lista
+clic(3, 0); key("6")
+eq(#modelo().barras[1].cargas, 0, "Borrar todas")
+H.deshacer()
+-- ENTER sobre la barra seleccionada con Carga abre la lista
+H.set_tool("carga"); H.sel = { t = "barra", i = 1 }
+key("enter")
+check(D.activo() ~= nil and shown("Cargas de la barra 1"), "ENTER con la barra seleccionada: lista de cargas")
+key("escape")
+-- ENTER (herramienta Seleccionar) > campo Cargas > Editar una a una
+H.set_tool("sel"); H.sel = { t = "barra", i = 1 }
+key("enter")
+check(shown("Cargas (4)"), "propiedades de barra con el numero de cargas")
+for _ = 1, 6 do key("down") end
+key("right"); key("right"); key("enter")
+check(D.activo() ~= nil and shown("Cargas de la barra 1"), "propiedades > Editar una a una abre la lista")
+key("escape")
+-- nodal: sin carga formulario directo; con carga editar/borrar
+H.set_tool("carga")
+clic(6, 0)
+check(shown("Carga en el nodo 2"), "nodo sin carga: formulario")
+key("down"); typed("-15"); key("down"); typed("4"); key("enter")
+clic(6, 0)
+check(D.activo() ~= nil and shown("Fy -15 kN") and shown("Mz 4 kN·m"), "nodo con carga: resumen en el titulo")
+check(shown("Editar (Fx, Fy, Mz)") and shown("Borrar la carga del nodo"), "opciones editar y borrar")
+key("1")
+check(shown("Carga en el nodo 2"), "editar abre el formulario"); key("escape")
+clic(6, 0); key("2")
+eq(modelo().nodos[2].carga, nil, "borrar la carga nodal")
+H.deshacer()
+check(modelo().nodos[2].carga ~= nil, "deshacer la carga nodal borrada")
+-- la carga termica se guarda y se restaura
+do
+  local saved2 = mock.save()
+  H.nuevo()
+  mock.restore(saved2)
+  local tc
+  for _, c in ipairs(modelo().barras[1].cargas) do if c.t == "T" then tc = c end end
+  check(tc ~= nil and tc.du == 20 and tc.dg == 10, "on.save/on.restore conservan la carga T")
+end
+
+-- ------------------------------------------------------------------ unidades en los dialogos
+print("-- unidades")
+sin_resultados()
+nuevo()
+clic(0, 0); clic(6, 0); key("escape")
+eq(U.actual, "kN-m", "unidades por omision")
+H.set_unidades("N-m")
+H.set_tool("sel"); H.sel = { t = "barra", i = 1 }
+key("enter")
+check(shown("E (Pa)") and shown("A (m²)") and shown("I (m4)"), "dialogo de barra en N-m")
+check(D.activo().campos[1].buf == "2e+11", "E = 200 GPa = 2e11 Pa: " .. tostring(D.activo().campos[1].buf))
+key("escape")
+H.set_tool("carga"); clic(3, 0)
+key("1")                                     -- puntual
+check(shown("Valor P (N)"), "puntual: etiqueta en N")
+check(D.activo().campos[2].buf == "10000", "valor por omision 10000 N")
+key("enter")
+near(modelo().barras[1].cargas[1].p, -10, "10000 N se guarda como -10 kN")
+check(shown("10000 N"), "etiqueta de la carga en el lienzo: 10000 N")
+H.set_unidades("tf-m")
+check(shown("1 tf") or shown("1.02 tf"), "etiqueta del lienzo en tf: " .. tostring(select(2, mock.has_text("tf"))))
+clic(3, 0)
+check(shown("P 1.02 tf abajo a=3 m"), "descripcion en tf")
+key("escape")
+clic(3, 0); key("1"); key("1")
+check(D.activo().campos[2].buf == "1", "valor por omision 1 tf")
+key("down"); typed("2"); key("enter")
+near(modelo().barras[1].cargas[2].p, -2 * 9.80665, "2 tf se guarda como -19.6133 kN", 1e-9)
+H.set_tool("sel"); H.sel = { t = "barra", i = 1 }; key("enter")
+check(shown("E (kgf/cm²)"), "E en kgf/cm2")
+key("escape")
+local sv = mock.save()
+eq(sv.cfg.unidades, "tf-m", "on.save guarda cfg.unidades")
+check(sv.modelo.barras[1].E > 1e8, "pero el modelo sigue en kN, m (E en kN/m2)")
+H.set_unidades("kN-m")
+mock.restore(sv)
+eq(U.actual, "tf-m", "on.restore recupera las unidades")
+-- apoyo elastico y asentamiento
+H.set_tool("apoyo"); clic(0, 0); key("5")
+check(shown("kx (tf/m)") and shown("kr (tf·m/rad)"), "resorte en tf")
+key("escape")
+H.set_unidades("N-m")
+clic(0, 0); key("5")
+check(shown("kx (N/m)") and shown("kr (N·m/rad)"), "resorte en N")
+key("escape")
+clic(0, 0); key("1"); clic(0, 0); key("6")
+check(shown("dx (m, + derecha)") and shown("giro (rad, + antih.)"), "asentamiento en m y rad")
+key("escape")
+-- menu y teclas
+H.set_unidades("kN-m")
+key("q")
+eq(U.actual, "N-m", "q cicla unidades"); key("q"); eq(U.actual, "tf-m", "q: tf-m"); key("q"); eq(U.actual, "kN-m", "q: vuelta a kN-m")
+H.menu_unidades()
+check(D.activo() ~= nil and shown("tf, m"), "menu de unidades")
+key("3")
+eq(U.actual, "tf-m", "el menu elige tf-m")
+H.set_unidades("kN-m")
+
+-- conversion consistente
+near(U.de_interna("momento", 45), 45, "kN-m: 45"); H.set_unidades("N-m")
+near(U.de_interna("momento", 45), 45000, "N-m: 45000"); H.set_unidades("tf-m")
+near(U.de_interna("momento", 45), 4.588, "tf-m: 4.588...", 1e-3)
+near(U.a_interna("fuerza", U.de_interna("fuerza", 12.5)), 12.5, "ida y vuelta", 1e-12)
+check(U.num(U.de_interna("momento", 45)) == "4.589", "4.589 tf·m")
+H.set_unidades("kN-m")
+
+-- ------------------------------------------------------------------------- legibilidad
+print("-- legibilidad")
+-- atajos de la barra de herramientas fuera del icono
+sin_resultados(); nuevo(); mock.paint()
+for _, b in ipairs(H.botones) do
+  if b.tecla then
+    local ok, t = mock.has_text(b.tecla)
+    local hallado = false
+    for _, tt in ipairs(mock.screen_text()) do
+      if tt.text == b.tecla and tt.size == 7 and tt.y < V.rect.y and tt.x >= b.x and tt.x < b.x + b.w then
+        hallado = true
+        check(tt.x >= b.x + 17, "atajo " .. b.tecla .. " no pisa el icono (x=" .. tt.x .. ", boton " .. b.x .. ")")
+        check(tt.x + tt.w <= b.x + b.w + 1, "atajo " .. b.tecla .. " cabe en el boton")
+      end
+    end
+    check(hallado, "atajo " .. b.tecla .. " dibujado")
+  end
+end
+-- varias cargas en la misma barra y nodo: ninguna etiqueta de carga se encima con otra
+local function etiquetas_carga()
+  mock.paint()
+  local out = {}
+  for _, t in ipairs(mock.screen_text()) do
+    local c = t.color
+    if c[1] == 225 and c[2] == 100 and c[3] == 0 and t.size == 7 and t.y > 22 and t.y < mock.H - 16 then out[#out + 1] = t end
+  end
+  return out
+end
+local function sin_encimarse(label)
+  local ts = etiquetas_carga()
+  for i = 1, #ts do
+    for j = i + 1, #ts do
+      local a, b = ts[i], ts[j]
+      local solape = a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + 10 and b.y < a.y + 10
+      check(not solape, label .. ": etiquetas encimadas '" .. a.text .. "' y '" .. b.text .. "'")
+    end
+  end
+  return #ts
+end
+sin_resultados(); nuevo()
+clic(0, 0); clic(6, 0); key("escape")
+V.encuadrar(modelo())
+do
+  local mm = modelo()
+  ED.agregar_carga_barra(mm, 1, { t = "w", a = 0, b = 6, w1 = -10, w2 = -10, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 1.5, p = -30, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 2, p = -25, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 2.5, p = -12.5, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "M", a = 3, m = 12 })
+  ED.agregar_carga_barra(mm, 1, { t = "T", du = 20, dg = 10, alfa = 1.2e-5, h = 0.3 })
+  ED.set_carga_nodo(mm, 2, 8, -15, 4)
+  ED.set_carga_nodo(mm, 1, -6, -9, -5)
+  ED.set_apoyo_tipo(mm, 1, "articulado"); ED.set_apoyo_tipo(mm, 2, "rodilloX")
+  mm.barras[1].cargas[#mm.barras[1].cargas + 1] = { t = "w", a = 3, b = 6, w1 = -4, w2 = -12, dir = "GY" }
+  ED.cambio()
+end
+H.set_tool("sel"); H.sel = nil
+local nlab = sin_encimarse("viga con varias cargas")
+check(nlab >= 8, "se dibujan todas las etiquetas (" .. nlab .. ")")
+dentro("viga con varias cargas")
+png("pol_cargas_apiladas")
+-- la misma viga en N-m (etiquetas mas anchas) tampoco se encima
+H.set_unidades("N-m"); sin_encimarse("viga con varias cargas en N-m"); dentro("cargas en N-m")
+H.set_unidades("kN-m")
+-- division de barra: captura
+sin_resultados(); nuevo()
+clic(0, 0); clic(6, 0); key("escape")
+do
+  local mm = modelo()
+  ED.set_apoyo_tipo(mm, 1, "articulado"); ED.set_apoyo_tipo(mm, 2, "rodilloX")
+  ED.agregar_carga_barra(mm, 1, { t = "w", a = 0, b = 6, w1 = -6, w2 = -10, dir = "GY" })
+  ED.agregar_carga_barra(mm, 1, { t = "P", a = 4.5, p = -20, dir = "GY" })
+  ED.cambio()
+end
+V.encuadrar(modelo())
+H.set_tool("nodo")
+mock.move(px(3), py(0) + 1)
+clic(3, 0)
+check(shown("dividida"), "mensaje de division")
+mock.move(px(1.5), py(0))
+dentro("division de barra")
+png("pol_dividir_barra")
+-- reencuadre: un nodo movido que sale de la vista vuelve a verse
+sin_resultados(); H.ejemplo("Viga apoyada"); H.encuadrar()
+H.set_tool("sel")
+clic(6, 0)
+key("enter")
+typed("60"); key("enter")
+do
+  local sx, sy = V.a_pantalla(modelo().nodos[2].x, modelo().nodos[2].y)
+  check(sx >= V.rect.x and sx <= V.rect.x + V.rect.w and sy >= V.rect.y and sy <= V.rect.y + V.rect.h,
+    "el nodo movido a x=60 queda dentro del lienzo (sx=" .. sx .. ")")
+end
+H.ejemplo("Viga apoyada"); H.encuadrar()
+mock.move(px(6), py(0))
+mock.drag(px(6), py(0), V.rect.x + V.rect.w - 4, py(0), 4)
+do
+  local sx = V.a_pantalla(modelo().nodos[2].x, modelo().nodos[2].y)
+  check(sx <= V.rect.x + V.rect.w - 14 and sx >= V.rect.x + 14, "tras arrastrar al borde se reencuadra (sx=" .. sx .. ")")
+end
+H.ejemplo("Viga apoyada"); H.encuadrar()
+V.fijar_snap(0.5)
+H.sel = { t = "nodo", i = 2 }
+for _ = 1, 40 do key("right") end
+do
+  local sx = V.a_pantalla(modelo().nodos[2].x, modelo().nodos[2].y)
+  check(sx <= V.rect.x + V.rect.w - 14, "con flechas el nodo no se sale de la vista (sx=" .. sx .. ")")
+end
+
+-- menu reorganizado
+print("-- menus")
+do
+  local titulos = {}
+  for _, mn in ipairs(mock.toolpalette_menu) do titulos[#titulos + 1] = mn[1] end
+  check(table.concat(titulos, ","):find("Ajustes"), "menu Ajustes")
+  local n = 0
+  for _, mn in ipairs(mock.toolpalette_menu) do
+    n = n + #mn - 1
+    check(#mn - 1 <= 30, "menu '" .. mn[1] .. "' con <= 30 items")
+  end
+  check(n <= 30 and #mock.toolpalette_menu <= 15, "toolpalette total " .. n .. " items")
+  local hay_unid = false
+  for _, mn in ipairs(mock.toolpalette_menu) do
+    for i = 2, #mn do if mn[i][1]:find("Unidades") then hay_unid = true end end
+  end
+  check(hay_unid, "Unidades en el menu")
+end
 
 -- PNG adicionales: estados representativos
 nuevo()

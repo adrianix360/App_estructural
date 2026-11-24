@@ -8,6 +8,8 @@ local V = require("ui.vista")
 local D = require("ui.dialogo")
 local P = require("ui.dibujo")
 local H = require("ui.herramientas")
+local U = require("ui.unidades")
+local Res = require("ui.resultados")
 
 H.init()
 
@@ -39,8 +41,6 @@ local function registrar_menu()
   archivo[#archivo + 1] = { "Guardar como...", H.guardar_como }
   archivo[#archivo + 1] = { "Abrir...", H.abrir }
   archivo[#archivo + 1] = { "Borrar guardado...", H.borrar_guardado }
-  archivo[#archivo + 1] = { "Deshacer (U)", H.deshacer }
-  archivo[#archivo + 1] = { "Rehacer (Y)", H.rehacer }
   toolpalette.register({
     archivo,
     { "Herramientas",
@@ -50,18 +50,18 @@ local function registrar_menu()
       { "Apoyo (A)", function() H.set_tool("apoyo") end },
       { "Carga (C)", function() H.set_tool("carga") end },
       { "Resolver (R)", H.resolver },
-      { "Coordenadas exactas (X)", H.dialogo_coordenadas } },
+      { "Coordenadas exactas (X)", H.dialogo_coordenadas },
+      { "Deshacer (U)", H.deshacer },
+      { "Rehacer (Y)", H.rehacer } },
     { "Vista",
       { "Encuadrar (E)", H.encuadrar },
       { "Acercar (+)", function() H.zoom(1.4) end },
       { "Alejar (-)", function() H.zoom(1 / 1.4) end },
+      { "Deformada real / ampliada (0)", H.toggle_def } },
+    { "Ajustes",
+      { "Unidades... (Q)", H.menu_unidades },
       { "Rejilla (G)", H.toggle_rejilla },
-      { "Snap 0.1 m", function() H.set_snap(0.1) end },
-      { "Snap 0.25 m", function() H.set_snap(0.25) end },
-      { "Snap 0.5 m", function() H.set_snap(0.5) end },
-      { "Snap 1 m", function() H.set_snap(1) end },
-      { "Sin snap", function() H.set_snap(0) end } },
-    { "Propiedades globales",
+      { "Snap... (K)", H.menu_snap },
       { "E, A, I y tipo de barra (P)", H.props_globales } },
     { "Ayuda",
       { "Guia rapida (H)", H.ayuda },
@@ -148,7 +148,8 @@ end
 -- ------------------------------------------------------------- persistencia
 function on.save()
   local t = ED.exportar()
-  t.cfg = { rejilla = V.rejilla, snap_i = V.snap_i, tool = H.tool, s = V.s, ox = V.ox, oy = V.oy }
+  t.cfg = { rejilla = V.rejilla, snap_i = V.snap_i, tool = H.tool, s = V.s, ox = V.ox, oy = V.oy,
+            unidades = U.actual, def_real = Res.def_real and true or false }
   return t
 end
 
@@ -158,6 +159,9 @@ function on.restore(t)
   H.sel, H.barra_a = nil, nil
   local c = t.cfg
   if type(c) == "table" then
+    if type(c.unidades) == "string" then U.set(c.unidades) end
+    if type(c.def_real) == "boolean" then Res.def_real = c.def_real end
+    Res.unidades_cambiaron()
     if type(c.rejilla) == "boolean" then V.rejilla = c.rejilla end
     if type(c.snap_i) == "number" and V.pasos[c.snap_i] then V.snap_i = c.snap_i end
     if c.tool == "sel" or c.tool == "nodo" or c.tool == "barra" or c.tool == "apoyo" or c.tool == "carga" then

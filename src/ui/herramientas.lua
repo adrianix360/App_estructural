@@ -7,6 +7,7 @@ local ED = require("ui.modelo_ed")
 local V = require("ui.vista")
 local D = require("ui.dialogo")
 local Res = require("ui.resultados")
+local U = require("ui.unidades")
 
 local H = {}
 
@@ -19,7 +20,8 @@ H.sel = nil            -- { t = "nodo"|"barra", i = n }
 H.barra_a = nil        -- primer nodo de la barra en curso
 H.msg = nil            -- { t = texto, err = bool } (se borra con la siguiente accion)
 H.ver = 0              -- sube con cada cambio del modelo
-H.hover = { px = nil, py = nil, wx = 0, wy = 0, sx = 0, sy = 0, en_lienzo = false, nodo = nil, barra = nil }
+H.hover = { px = nil, py = nil, wx = 0, wy = 0, sx = 0, sy = 0, en_lienzo = false, nodo = nil, barra = nil,
+                div = false, dx = 0, dy = 0 }
 H.botones = {}
 
 local WW, HH = 318, 212
@@ -78,8 +80,8 @@ local function layout_botones()
     local d = DEF[i]
     if d == "sep" then x = x + 10
     else
-      H.botones[#H.botones + 1] = { id = d.id, herr = d.herr, tecla = d.tecla, x = x, y = 1, w = 24, h = H.TB_H - 3 }
-      x = x + 26
+      H.botones[#H.botones + 1] = { id = d.id, herr = d.herr, tecla = d.tecla, x = x, y = 1, w = 25, h = H.TB_H - 3 }
+      x = x + 27
     end
   end
 end
@@ -138,6 +140,23 @@ local function nodo_en(px, py, tol)
   return best
 end
 
+-- Punto de division de la barra e para un clic a `a` m del nodo i: con snap activo se ajusta a un
+-- multiplo del paso a lo largo de la barra. Devuelve a2 | nil si queda pegado a un nodo.
+local MINSEG = 1e-3
+local function punto_div(e, a)
+  local m = ED.m
+  if not m.barras[e] then return nil end
+  local L = ED.longitud(m, e)
+  local st = V.snap_valor()
+  local a2 = a
+  if st and st > 0 then
+    local q = floor(a / st + 0.5) * st
+    if q >= MINSEG and q <= L - MINSEG then a2 = q end
+  end
+  if a2 < MINSEG or a2 > L - MINSEG then return nil end
+  return a2
+end
+
 -- barra mas cercana al punto de pantalla; devuelve e, a (m desde el nodo i)
 local function barra_en(px, py, tol)
   local m = ED.m
@@ -184,13 +203,25 @@ local function actualizar_hover(x, y)
     hv.sx, hv.sy = V.a_pantalla(hv.wx, hv.wy)
     hv.nodo = nodo_en(x, y, NODO_TOL)
     hv.barra = nil
-    if not hv.nodo then hv.barra = barra_en(x, y, BARRA_TOL) end
+    hv.div = false
+    local ba
+    if not hv.nodo then hv.barra, ba = barra_en(x, y, BARRA_TOL) end
+    if hv.barra and not drag and (H.tool == "nodo" or H.tool == "barra") then
+      local a2 = punto_div(hv.barra, ba)
+      if a2 then
+        local b = ED.m.barras[hv.barra]
+        local na, nb = ED.m.nodos[b.ni], ED.m.nodos[b.nj]
+        local f = a2 / ED.longitud(ED.m, hv.barra)
+        hv.dx, hv.dy = V.a_pantalla(na.x + (nb.x - na.x) * f, na.y + (nb.y - na.y) * f)
+        hv.div = true
+      end
+    end
     if drag then poner_cursor("hand closed")
     elseif H.tool == "nodo" or H.tool == "barra" then poner_cursor("crosshair")
     elseif hv.nodo or hv.barra then poner_cursor("pointer")
     else poner_cursor("default") end
   else
-    hv.nodo, hv.barra = nil, nil
+    hv.nodo, hv.barra, hv.div = nil, nil, false
     poner_cursor("default")
   end
 end
@@ -216,15 +247,15 @@ function H.texto_estado()
       r = "Nodo " .. s.i .. ": ENTER edita, DEL borra, M mueve"
     elseif s and s.t == "barra" and m.barras[s.i] then
       local b = m.barras[s.i]
-      r = "Barra " .. s.i .. " (" .. b.ni .. "-" .. b.nj .. ", L=" .. fmt(ED.longitud(m, s.i)) .. " m): ENTER edita"
+      r = "Barra " .. s.i .. " (" .. b.ni .. "-" .. b.nj .. ", L=" .. fmt(ED.longitud(m, s.i)) .. " m): ENTER edita, C cargas"
     else
       r = "Seleccionar: clic en nodo/barra, arrastra para mover"
     end
   elseif t == "nodo" then
-    r = "Nodo - Clic: crear nodo (ENTER: x,y exactos)"
+    r = "Nodo - Clic: crear (sobre una barra la divide). ENTER: x,y"
   elseif t == "barra" then
     if a then r = "Barra - Clic en el nodo B (ESC termina)"
-    else r = "Barra - Clic en el nodo A (o en vacio)" end
+    else r = "Barra - Clic en el nodo A (o en vacio; sobre barra: divide)" end
   elseif t == "apoyo" then
     r = "Apoyo - Clic en un nodo para elegir el tipo"
   else
@@ -303,6 +334,51 @@ function H.ciclar_snap()
   H.set_snap(v)
 end
 
+-- Menu Ajustes: snap, unidades y deformada
+function H.menu_snap()
+  local pasos = { 0.1, 0.25, 0.5, 1, 0 }
+  local items = { "0.1 m", "0.25 m", "0.5 m", "1 m", "Sin snap (libre)" }
+  D.menu({
+    titulo = "Snap de la rejilla",
+    items = items,
+    sel = V.snap_i,
+    ancho = 200,
+    elegir = function(k) H.set_snap(pasos[k]) end,
+  })
+end
+
+function H.set_unidades(nombre)
+  if not U.set(nombre) then return end
+  Res.unidades_cambiaron()
+  if document and document.markChanged then document.markChanged() end
+  aviso("Unidades: " .. nombre .. " (fuerza " .. U.etiqueta("fuerza") .. ", E en " .. U.etiqueta("E") .. ")")
+end
+
+function H.menu_unidades()
+  D.menu({
+    titulo = "Unidades de presentacion",
+    items = { U.nombres[1], U.nombres[2], U.nombres[3] },
+    sel = U.indice(),
+    ancho = 230,
+    elegir = function(k) H.set_unidades(U.sistemas[k]) end,
+  })
+end
+
+function H.ciclar_unidades()
+  H.set_unidades(U.sistemas[U.indice() % #U.sistemas + 1])
+end
+
+-- Deformada real <-> ampliada (con resultados abre la vista de deformada)
+function H.toggle_def()
+  if Res.modo then
+    if Res.modo ~= "def" then Res.set_vista("def") else Res.toggle_def() end
+    aviso(Res.def_real and "Deformada real" or "Deformada ampliada")
+  else
+    Res.toggle_def()
+    aviso(Res.def_real and "Deformada: real (al resolver)" or "Deformada: ampliada (al resolver)")
+  end
+end
+
 function H.deshacer()
   local ok, msg = ED.deshacer()
   if ok then aviso("Deshecho") else aviso(msg, true) end
@@ -373,6 +449,13 @@ function H.dialogo_coordenadas()
   })
 end
 
+-- Etiquetas de campos con las unidades del sistema vigente: ef("Fx", "fuerza", ", + derecha")
+local function ef(nombre, cant, extra)
+  return nombre .. " (" .. U.etiqueta(cant) .. (extra or "") .. ")"
+end
+local function vi(cant, v) return U.de_interna(cant, v) end   -- interna -> pantalla
+local function ai(cant, v) return U.a_interna(cant, v) end    -- pantalla -> interna
+
 local function dialogo_nodo(i)
   local n = ED.m.nodos[i]
   if not n then return end
@@ -381,20 +464,21 @@ local function dialogo_nodo(i)
     titulo = "Nodo " .. i,
     campos = {
       { id = "x", etq = "x (m)", valor = n.x }, { id = "y", etq = "y (m)", valor = n.y },
-      { id = "fx", etq = "Fx (kN, + derecha)", valor = c.fx },
-      { id = "fy", etq = "Fy (kN, + arriba)", valor = c.fy },
-      { id = "mz", etq = "Mz (kN·m, + antih.)", valor = c.mz },
+      { id = "fx", etq = ef("Fx", "fuerza", ", + derecha"), valor = vi("fuerza", c.fx) },
+      { id = "fy", etq = ef("Fy", "fuerza", ", + arriba"), valor = vi("fuerza", c.fy) },
+      { id = "mz", etq = ef("Mz", "momento", ", + antih."), valor = vi("momento", c.mz) },
     },
     aceptar = function(v)
       local ok, msg = ED.hacer(function(m)
         local a, b = ED.mover_nodo(m, i, v.x, v.y)
         if not a then return nil, b end
-        local c2, d2 = ED.set_carga_nodo(m, i, v.fx, v.fy, v.mz)
+        local c2, d2 = ED.set_carga_nodo(m, i, ai("fuerza", v.fx), ai("fuerza", v.fy), ai("momento", v.mz))
         if not c2 then return nil, d2 end
         ED.ajustar_todas(m)
         return true
       end)
       if not ok then return msg end
+      asegurar_visible(i)
       aviso("Nodo " .. i .. " actualizado")
       return nil
     end,
@@ -409,13 +493,14 @@ local function dialogo_barra(e)
   form({
     titulo = "Barra " .. e .. " (nodos " .. b.ni .. "-" .. b.nj .. ", L=" .. fmt(ED.longitud(m, e)) .. " m)",
     campos = {
-      { id = "E", etq = "E (GPa)", valor = b.E / ED.GPA },
-      { id = "A", etq = "A (cm²)", valor = b.A / ED.CM2 },
-      { id = "I", etq = "I (cm4)", valor = b.I / ED.CM4 },
+      { id = "E", etq = ef("E", "E"), valor = vi("E", b.E) },
+      { id = "A", etq = ef("A", "A"), valor = vi("A", b.A) },
+      { id = "I", etq = ef("I", "I"), valor = vi("I", b.I) },
       { id = "tipo", etq = "Tipo", tipo = "opcion", opciones = { "Portico", "Cercha" }, valor = (b.tipo == "cercha") and 2 or 1 },
       { id = "ri", etq = "Rotula en nodo i", tipo = "opcion", opciones = { "No", "Si" }, valor = b.rot_i and 2 or 1 },
       { id = "rj", etq = "Rotula en nodo j", tipo = "opcion", opciones = { "No", "Si" }, valor = b.rot_j and 2 or 1 },
-      { id = "cg", etq = "Cargas (" .. nc .. ")", tipo = "opcion", opciones = { "Conservar", "Borrar todas" }, valor = 1 },
+      { id = "cg", etq = "Cargas (" .. nc .. ")", tipo = "opcion",
+        opciones = { "Conservar", "Borrar todas", "Editar una a una" }, valor = 1 },
     },
     aceptar = function(v)
       if v.E <= 0 then return "E debe ser mayor que 0" end
@@ -424,7 +509,7 @@ local function dialogo_barra(e)
       local ok, msg = ED.hacer(function(mm)
         local bb = mm.barras[e]
         if not bb then return nil, "La barra ya no existe" end
-        bb.E, bb.A, bb.I = v.E * ED.GPA, v.A * ED.CM2, v.I * ED.CM4
+        bb.E, bb.A, bb.I = ai("E", v.E), ai("A", v.A), ai("I", v.I)
         bb.tipo = (v.tipo == 2) and "cercha" or "portico"
         bb.rot_i, bb.rot_j = (v.ri == 2), (v.rj == 2)
         if v.cg == 2 then bb.cargas = {} end
@@ -432,6 +517,7 @@ local function dialogo_barra(e)
       end)
       if not ok then return msg end
       aviso("Barra " .. e .. " actualizada")
+      if v.cg == 3 then H.menu_carga_barra(e, nil) end
       return nil
     end,
   })
@@ -442,15 +528,15 @@ function H.props_globales()
   form({
     titulo = "Propiedades globales (barras nuevas)",
     campos = {
-      { id = "E", etq = "E (GPa)", valor = p.E / ED.GPA },
-      { id = "A", etq = "A (cm²)", valor = p.A / ED.CM2 },
-      { id = "I", etq = "I (cm4)", valor = p.I / ED.CM4 },
+      { id = "E", etq = ef("E", "E"), valor = vi("E", p.E) },
+      { id = "A", etq = ef("A", "A"), valor = vi("A", p.A) },
+      { id = "I", etq = ef("I", "I"), valor = vi("I", p.I) },
       { id = "tipo", etq = "Tipo de barra nueva", tipo = "opcion", opciones = { "Portico", "Cercha" }, valor = (p.tipo == "cercha") and 2 or 1 },
       { id = "todas", etq = "Aplicar a", tipo = "opcion", opciones = { "Solo barras nuevas", "Todas las barras" }, valor = 1 },
     },
     aceptar = function(v)
       if v.E <= 0 or v.A <= 0 or v.I <= 0 then return "E, A e I deben ser mayores que 0" end
-      p.E, p.A, p.I = v.E * ED.GPA, v.A * ED.CM2, v.I * ED.CM4
+      p.E, p.A, p.I = ai("E", v.E), ai("A", v.A), ai("I", v.I)
       p.tipo = (v.tipo == 2) and "cercha" or "portico"
       if v.todas == 2 and #ED.m.barras > 0 then
         ED.hacer(function(m)
@@ -480,12 +566,14 @@ local function dialogo_resorte(i)
   form({
     titulo = "Resorte en nodo " .. i .. " (0 = sin resorte)",
     campos = {
-      { id = "kx", etq = "kx (kN/m)", valor = ap.kx or 0, min = 0 },
-      { id = "ky", etq = "ky (kN/m)", valor = ap.ky or 0, min = 0 },
-      { id = "kr", etq = "kr (kN·m/rad)", valor = ap.kr or 0, min = 0 },
+      { id = "kx", etq = ef("kx", "rig"), valor = vi("rig", ap.kx or 0), min = 0 },
+      { id = "ky", etq = ef("ky", "rig"), valor = vi("rig", ap.ky or 0), min = 0 },
+      { id = "kr", etq = ef("kr", "rigrot"), valor = vi("rigrot", ap.kr or 0), min = 0 },
     },
     aceptar = function(v)
-      local ok, msg = ED.hacer(function(m) return ED.set_resorte(m, i, v.kx, v.ky, v.kr) end)
+      local ok, msg = ED.hacer(function(m)
+        return ED.set_resorte(m, i, ai("rig", v.kx), ai("rig", v.ky), ai("rigrot", v.kr))
+      end)
       if not ok then return msg end
       aviso("Nodo " .. i .. ": apoyo elastico")
       return nil
@@ -500,12 +588,14 @@ local function dialogo_asentamiento(i)
   form({
     titulo = "Asentamiento nodo " .. i .. " (GDL restringidos)",
     campos = {
-      { id = "dx", etq = "dx (mm, + derecha)", valor = (ap.dx or 0) * 1000 },
-      { id = "dy", etq = "dy (mm, + arriba)", valor = (ap.dy or 0) * 1000 },
-      { id = "dr", etq = "giro (mrad, + antih.)", valor = (ap.drz or 0) * 1000 },
+      { id = "dx", etq = ef("dx", "desp", ", + derecha"), valor = vi("desp", ap.dx or 0) },
+      { id = "dy", etq = ef("dy", "desp", ", + arriba"), valor = vi("desp", ap.dy or 0) },
+      { id = "dr", etq = ef("giro", "giro", ", + antih."), valor = vi("giro", ap.drz or 0) },
     },
     aceptar = function(v)
-      local ok, msg = ED.hacer(function(m) return ED.set_asentamiento(m, i, v.dx / 1000, v.dy / 1000, v.dr / 1000) end)
+      local ok, msg = ED.hacer(function(m)
+        return ED.set_asentamiento(m, i, ai("desp", v.dx), ai("desp", v.dy), ai("giro", v.dr))
+      end)
       if not ok then return msg end
       aviso("Nodo " .. i .. ": asentamiento aplicado")
       return nil
@@ -546,17 +636,56 @@ end
 -- ---------------------------------------------------------------- cargas
 local DIR_OPC = { "Abajo (GY-)", "Arriba (GY+)", "Derecha (GX+)", "Izquierda (GX-)",
                   "Perpendicular a la barra", "Axial (a lo largo)" }
+local DIR_SIG = { -1, 1, 1, -1, 1, 1 }       -- signo de la carga interna respecto de la magnitud tecleada
+local DIR_DIR = { "GY", "GY", "GX", "GX", "L", "LX" }
+local DIR_TXT = { "abajo", "arriba", "der.", "izq.", "perp.", "axial" }
 
 local function dir_desde_opcion(k, mag)
-  if k == 1 then return "GY", -mag
-  elseif k == 2 then return "GY", mag
-  elseif k == 3 then return "GX", mag
-  elseif k == 4 then return "GX", -mag
-  elseif k == 5 then return "L", mag end
-  return "LX", mag
+  return DIR_DIR[k], DIR_SIG[k] * mag
 end
 
-function H.dialogo_carga_nodo(i)
+-- (indice de opcion, magnitud) a partir de una carga existente (v = p, w1 o w2 con signo)
+local function opcion_de(dir, v)
+  if dir == "GY" then return (v < 0) and 1 or 2, abs(v) end
+  if dir == "GX" then return (v > 0) and 3 or 4, abs(v) end
+  if dir == "L" then return 5, v end
+  return 6, v
+end
+
+-- Descripcion corta de una carga de barra (lista de cargas), en las unidades vigentes
+local function nf(cant, v, sig) return U.num(U.de_interna(cant, v), sig or 4) end
+function H.describir_carga(c)
+  if c.t == "P" then
+    local k, mag = opcion_de(c.dir, c.p)
+    return "P " .. nf("fuerza", mag) .. " " .. U.etiqueta("fuerza") .. " " .. DIR_TXT[k] .. " a=" .. nf("long", c.a) .. " m"
+  elseif c.t == "M" then
+    return "M " .. nf("momento", abs(c.m)) .. " " .. U.etiqueta("momento") .. (c.m > 0 and " antih." or " horario")
+      .. " a=" .. nf("long", c.a) .. " m"
+  elseif c.t == "w" then
+    local ref = (c.w1 ~= 0) and c.w1 or c.w2
+    local k = opcion_de(c.dir, ref)
+    local sg = DIR_SIG[k]
+    local v1, v2 = sg * c.w1, sg * c.w2
+    local val
+    if c.w1 == c.w2 then val = nf("dist", v1) else val = nf("dist", v1) .. "->" .. nf("dist", v2) end
+    return "w " .. val .. " " .. U.etiqueta("dist") .. " " .. nf("long", c.a) .. "-" .. nf("long", c.b) .. " m " .. DIR_TXT[k]
+  elseif c.t == "T" then
+    return "T du=" .. nf("temp", c.du) .. " dg=" .. nf("temp", c.dg) .. " " .. U.etiqueta("temp")
+  end
+  return "?"
+end
+
+local function describir_nodal(c)
+  local p = {}
+  if c.fx ~= 0 then p[#p + 1] = "Fx " .. nf("fuerza", c.fx) end
+  if c.fy ~= 0 then p[#p + 1] = "Fy " .. nf("fuerza", c.fy) end
+  local t = table.concat(p, ", ")
+  if t ~= "" then t = t .. " " .. U.etiqueta("fuerza") end
+  if c.mz ~= 0 then t = t .. ((t ~= "") and ", " or "") .. "Mz " .. nf("momento", c.mz) .. " " .. U.etiqueta("momento") end
+  return t
+end
+
+local function form_carga_nodo(i)
   local n = ED.m.nodos[i]
   if not n then return end
   H.sel = { t = "nodo", i = i }
@@ -564,12 +693,14 @@ function H.dialogo_carga_nodo(i)
   form({
     titulo = "Carga en el nodo " .. i,
     campos = {
-      { id = "fx", etq = "Fx (kN, + derecha)", valor = c.fx },
-      { id = "fy", etq = "Fy (kN, + arriba)", valor = c.fy },
-      { id = "mz", etq = "Mz (kN·m, + antih.)", valor = c.mz },
+      { id = "fx", etq = ef("Fx", "fuerza", ", + derecha"), valor = vi("fuerza", c.fx) },
+      { id = "fy", etq = ef("Fy", "fuerza", ", + arriba"), valor = vi("fuerza", c.fy) },
+      { id = "mz", etq = ef("Mz", "momento", ", + antih."), valor = vi("momento", c.mz) },
     },
     aceptar = function(v)
-      local ok, msg = ED.hacer(function(m) return ED.set_carga_nodo(m, i, v.fx, v.fy, v.mz) end)
+      local ok, msg = ED.hacer(function(m)
+        return ED.set_carga_nodo(m, i, ai("fuerza", v.fx), ai("fuerza", v.fy), ai("momento", v.mz))
+      end)
       if not ok then return msg end
       if v.fx == 0 and v.fy == 0 and v.mz == 0 then aviso("Nodo " .. i .. ": sin carga")
       else aviso("Nodo " .. i .. ": carga aplicada") end
@@ -578,114 +709,247 @@ function H.dialogo_carga_nodo(i)
   })
 end
 
-local function dialogo_carga_barra(e, tipo, a_clic)
+-- Sin carga: formulario directo. Con carga: Editar / Borrar
+function H.dialogo_carga_nodo(i)
+  local n = ED.m.nodos[i]
+  if not n then return end
+  H.sel = { t = "nodo", i = i }
+  if not n.carga then form_carga_nodo(i); return end
+  D.menu({
+    titulo = "Nodo " .. i .. ": " .. describir_nodal(n.carga),
+    items = { "Editar (Fx, Fy, Mz)...", "Borrar la carga del nodo" },
+    ancho = 290,
+    elegir = function(k)
+      if k == 1 then form_carga_nodo(i)
+      else
+        ED.hacer(function(m) return ED.set_carga_nodo(m, i, 0, 0, 0) end)
+        aviso("Nodo " .. i .. ": carga borrada (U deshace)")
+      end
+    end,
+  })
+end
+
+-- o = { a = posicion sugerida (clic), k = indice de la carga que se edita, c = esa carga }
+local function dialogo_carga_barra(e, tipo, o)
+  o = o or {}
   local m = ED.m
   local b = m.barras[e]
   if not b then return end
   local L = ED.longitud(m, e)
   local Ls = fmt(L)
-  local pos = a_clic or (L / 2)
+  local c0 = o.c
+  local pos = o.a or (L / 2)
   local st = V.snap_valor()
-  if st and st > 0 then pos = floor(pos / st + 0.5) * st else pos = floor(pos * 100 + 0.5) / 100 end
+  if not c0 then
+    if st and st > 0 then pos = floor(pos / st + 0.5) * st else pos = floor(pos * 100 + 0.5) / 100 end
+  end
   if pos < 0 then pos = 0 elseif pos > L then pos = L end
+  local editar = o.k ~= nil
   local titulo = "Barra " .. e .. " (L=" .. Ls .. " m): "
   local function terminar(c, texto)
-    local ok, msg = ED.hacer(function(mm) return ED.agregar_carga_barra(mm, e, c) end)
+    local ok, msg = ED.hacer(function(mm)
+      if editar then return ED.reemplazar_carga_barra(mm, e, o.k, c) end
+      return ED.agregar_carga_barra(mm, e, c)
+    end)
     if not ok then return msg end
-    aviso(texto)
+    aviso(editar and ("Carga " .. o.k .. " de la barra " .. e .. " modificada") or texto)
     return nil
   end
+  local mag0 = U.defecto("fuerza")
   if tipo == "P" then
+    local opt, mag = 1, mag0
+    if c0 then opt, mag = opcion_de(c0.dir, c0.p); mag = vi("fuerza", mag) end
     form({
-      titulo = titulo .. "carga puntual",
+      titulo = titulo .. (editar and "editar puntual" or "carga puntual"),
       campos = {
-        { id = "a", etq = "a (m, desde nodo " .. b.ni .. ")", valor = pos },
-        { id = "p", etq = "Valor P (kN)", valor = 10 },
-        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = 1 },
+        { id = "a", etq = "a (m, desde nodo " .. b.ni .. ")", valor = c0 and c0.a or pos },
+        { id = "p", etq = ef("Valor P", "fuerza"), valor = mag },
+        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = opt },
       },
       aceptar = function(v)
-        local dir, val = dir_desde_opcion(v.d, v.p)
+        local dir, val = dir_desde_opcion(v.d, ai("fuerza", v.p))
         return terminar({ t = "P", a = v.a, p = val, dir = dir }, "Carga puntual agregada a la barra " .. e)
       end,
     })
   elseif tipo == "w" then
+    local opt, mag = 1, mag0
+    if c0 then opt, mag = opcion_de(c0.dir, (c0.w1 ~= 0) and c0.w1 or c0.w2); mag = vi("dist", mag) end
     form({
-      titulo = titulo .. "distribuida",
+      titulo = titulo .. (editar and "editar distribuida" or "distribuida"),
       campos = {
-        { id = "a", etq = "Desde a (m)", valor = 0 },
-        { id = "b", etq = "Hasta b (m)", valor = L },
-        { id = "w", etq = "Valor w (kN/m)", valor = 10 },
-        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = 1 },
+        { id = "a", etq = "Desde a (m)", valor = c0 and c0.a or 0 },
+        { id = "b", etq = "Hasta b (m)", valor = c0 and c0.b or L },
+        { id = "w", etq = ef("Valor w", "dist"), valor = mag },
+        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = opt },
       },
       aceptar = function(v)
-        local dir, val = dir_desde_opcion(v.d, v.w)
+        local dir, val = dir_desde_opcion(v.d, ai("dist", v.w))
         return terminar({ t = "w", a = v.a, b = v.b, w1 = val, w2 = val, dir = dir },
           "Carga distribuida agregada a la barra " .. e)
       end,
     })
   elseif tipo == "trap" then
+    local opt, m1, m2 = 1, 0, mag0
+    if c0 then
+      opt = opcion_de(c0.dir, (c0.w1 ~= 0) and c0.w1 or c0.w2)
+      m1, m2 = vi("dist", DIR_SIG[opt] * c0.w1), vi("dist", DIR_SIG[opt] * c0.w2)
+    end
     form({
-      titulo = titulo .. "trapezoidal",
+      titulo = titulo .. (editar and "editar trapezoidal" or "trapezoidal"),
       campos = {
-        { id = "a", etq = "Desde a (m)", valor = 0 },
-        { id = "b", etq = "Hasta b (m)", valor = L },
-        { id = "w1", etq = "w1 en a (kN/m)", valor = 0 },
-        { id = "w2", etq = "w2 en b (kN/m)", valor = 10 },
-        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = 1 },
+        { id = "a", etq = "Desde a (m)", valor = c0 and c0.a or 0 },
+        { id = "b", etq = "Hasta b (m)", valor = c0 and c0.b or L },
+        { id = "w1", etq = ef("w1 en a", "dist"), valor = m1 },
+        { id = "w2", etq = ef("w2 en b", "dist"), valor = m2 },
+        { id = "d", etq = "Direccion", tipo = "opcion", opciones = DIR_OPC, valor = opt },
       },
       aceptar = function(v)
-        local dir, w1 = dir_desde_opcion(v.d, v.w1)
-        local _, w2 = dir_desde_opcion(v.d, v.w2)
+        local dir, w1 = dir_desde_opcion(v.d, ai("dist", v.w1))
+        local _, w2 = dir_desde_opcion(v.d, ai("dist", v.w2))
         return terminar({ t = "w", a = v.a, b = v.b, w1 = w1, w2 = w2, dir = dir },
           "Carga trapezoidal agregada a la barra " .. e)
       end,
     })
-  else
+  elseif tipo == "T" then
     form({
-      titulo = titulo .. "momento",
+      titulo = titulo .. (editar and "editar temperatura" or "temperatura"),
       campos = {
-        { id = "a", etq = "a (m, desde nodo " .. b.ni .. ")", valor = pos },
-        { id = "m", etq = "M (kN·m, + antih.)", valor = 10 },
+        { id = "du", etq = ef("du uniforme", "temp"), valor = c0 and vi("temp", c0.du) or 20 },
+        { id = "dg", etq = ef("dg inf-sup", "temp"), valor = c0 and vi("temp", c0.dg) or 0 },
+        { id = "al", etq = ef("alfa", "alfa"), valor = vi("alfa", c0 and c0.alfa or 1.2e-5) },
+        { id = "h", etq = ef("h canto", "canto"), valor = vi("canto", c0 and c0.h or 0.3) },
       },
       aceptar = function(v)
-        return terminar({ t = "M", a = v.a, m = v.m }, "Momento agregado a la barra " .. e)
+        if v.al <= 0 then return "alfa debe ser mayor que 0" end
+        if v.dg ~= 0 and v.h <= 0 then return "Con gradiente (dg) el canto h debe ser mayor que 0" end
+        local c = { t = "T", du = ai("temp", v.du), dg = ai("temp", v.dg), alfa = ai("alfa", v.al) }
+        if v.h > 0 then c.h = ai("canto", v.h) end
+        return terminar(c, "Carga termica agregada a la barra " .. e)
+      end,
+    })
+  else
+    form({
+      titulo = titulo .. (editar and "editar momento" or "momento"),
+      campos = {
+        { id = "a", etq = "a (m, desde nodo " .. b.ni .. ")", valor = c0 and c0.a or pos },
+        { id = "m", etq = ef("M", "momento", ", + antih."), valor = c0 and vi("momento", c0.m) or mag0 },
+      },
+      aceptar = function(v)
+        return terminar({ t = "M", a = v.a, m = ai("momento", v.m) }, "Momento agregado a la barra " .. e)
       end,
     })
   end
 end
 
+local function editar_carga(e, k)
+  local c = ED.m.barras[e] and ED.m.barras[e].cargas[k]
+  if not c then return end
+  local tipo = c.t
+  if tipo == "w" and c.w1 ~= c.w2 then tipo = "trap" end
+  dialogo_carga_barra(e, tipo, { k = k, c = c })
+end
+
+-- Elegir el tipo de carga nueva
+local function menu_tipos(e, a_clic)
+  local b = ED.m.barras[e]
+  if not b then return end
+  D.menu({
+    titulo = "Carga en barra " .. e .. ": nueva",
+    items = { "Puntual", "Distribuida uniforme", "Distribuida trapezoidal/triangular", "Momento puntual",
+              "Temperatura (du, dg)" },
+    sel = 2,
+    ancho = 270,
+    elegir = function(k)
+      if k == 1 then dialogo_carga_barra(e, "P", { a = a_clic })
+      elseif k == 2 then dialogo_carga_barra(e, "w")
+      elseif k == 3 then dialogo_carga_barra(e, "trap")
+      elseif k == 4 then dialogo_carga_barra(e, "M", { a = a_clic })
+      else dialogo_carga_barra(e, "T") end
+    end,
+  })
+end
+
+-- Una carga: Editar / Borrar / Volver a la lista
+local function menu_una_carga(e, k)
+  local c = ED.m.barras[e] and ED.m.barras[e].cargas[k]
+  if not c then return end
+  D.menu({
+    titulo = H.describir_carga(c),
+    items = { "Editar...", "Borrar esta carga", "Volver a la lista" },
+    ancho = 290,
+    elegir = function(j)
+      if j == 1 then editar_carga(e, k)
+      elseif j == 2 then
+        ED.hacer(function(m) return ED.borrar_carga_barra(m, e, k) end)
+        aviso("Carga " .. k .. " de la barra " .. e .. " borrada (U deshace)")
+        if #ED.m.barras[e].cargas > 0 then H.menu_carga_barra(e) end
+      else H.menu_carga_barra(e) end
+    end,
+  })
+end
+
+-- Sin cargas: elige el tipo. Con cargas: lista (Agregar, cada carga -> Editar/Borrar, Borrar todas)
 function H.menu_carga_barra(e, a_clic)
   local b = ED.m.barras[e]
   if not b then return end
   H.sel = { t = "barra", i = e }
   local nc = #b.cargas
+  if nc == 0 then menu_tipos(e, a_clic); return end
+  local items = { "+ Agregar carga..." }
+  for k = 1, nc do items[#items + 1] = H.describir_carga(b.cargas[k]) end
+  items[#items + 1] = "Borrar todas las cargas"
   D.menu({
-    titulo = "Carga en barra " .. e .. (nc > 0 and (" (" .. nc .. " cargas)") or ""),
-    items = { "Puntual", "Distribuida uniforme", "Distribuida trapezoidal/triangular", "Momento puntual",
-              "Borrar cargas de esta barra" },
-    sel = 2,
-    ancho = 270,
+    titulo = "Cargas de la barra " .. e .. " (" .. nc .. ")",
+    items = items,
+    sel = 1,
+    ancho = 296,
     elegir = function(k)
-      if k == 1 then dialogo_carga_barra(e, "P", a_clic)
-      elseif k == 2 then dialogo_carga_barra(e, "w")
-      elseif k == 3 then dialogo_carga_barra(e, "trap")
-      elseif k == 4 then dialogo_carga_barra(e, "M", a_clic)
-      else
-        if #ED.m.barras[e].cargas == 0 then aviso("La barra " .. e .. " no tiene cargas", true)
-        else
-          ED.hacer(function(m) m.barras[e].cargas = {}; return true end)
-          aviso("Cargas de la barra " .. e .. " borradas")
-        end
-      end
+      if k == 1 then menu_tipos(e, a_clic)
+      elseif k == #items then
+        ED.hacer(function(m) m.barras[e].cargas = {}; return true end)
+        aviso("Cargas de la barra " .. e .. " borradas (U deshace)")
+      else menu_una_carga(e, k - 1) end
     end,
   })
 end
 
 -- ---------------------------------------------------- acciones por herramienta
 -- target = { nodo = i | nil, barra = e | nil, a = m, wx, wy }
+-- Divide la barra t.barra en el punto del clic y devuelve el indice del nodo nuevo (o nil)
+local function dividir_en_clic(t)
+  local a2 = punto_div(t.barra, t.a or 0)
+  if not a2 then aviso("Demasiado cerca de un nodo: haz clic en el nodo", true); return nil end
+  local e, idx, e2, tipo0 = t.barra, nil, nil, ED.m.barras[t.barra].tipo
+  local ok, msg = ED.hacer(function(mm)
+    local i, e2n = ED.dividir_barra(mm, e, a2)
+    if not i then return nil, e2n end
+    idx, e2 = i, e2n
+    return true
+  end)
+  if not ok then aviso(msg, true); return nil end
+  H.sel = { t = "nodo", i = idx }
+  aviso("Barra " .. e .. " dividida: nodo " .. idx .. " a " .. fmt(a2) .. " m (barras " .. e .. " y " .. e2 .. ")"
+    .. (tipo0 == "cercha" and ", ahora porticos articulados" or "") .. ". U deshace")
+  return idx
+end
+
 function H.accion(t, exacto)
   local m = ED.m
   local tool = H.tool
+  -- clic en el interior de una barra con Nodo o Barra: nodo nuevo que la divide
+  if (tool == "nodo" or tool == "barra") and not t.nodo and t.barra and not exacto then
+    local b = m.barras[t.barra]
+    if tool == "barra" and H.barra_a and b and (b.ni == H.barra_a or b.nj == H.barra_a) then
+      aviso("Esa barra ya parte del nodo A: haz clic en otro lugar", true)
+      return
+    end
+    local idx = dividir_en_clic(t)
+    if not idx then return end
+    asegurar_visible(idx)
+    if tool == "nodo" then return end
+    t = { nodo = idx, wx = ED.m.nodos[idx].x, wy = ED.m.nodos[idx].y }
+    m = ED.m
+  end
   if tool == "barra" then
     local A = H.barra_a
     if not A then
@@ -780,8 +1044,9 @@ end
 local function clic(px, py)
   actualizar_hover(px, py)
   local hv = H.hover
+  if Res.modo and Res.clic_selector(px, py) then redraw(); return end
   local t = { nodo = hv.nodo, wx = hv.wx, wy = hv.wy }
-  if not t.nodo and H.tool ~= "nodo" then
+  if not t.nodo then
     local e, a = barra_en(px, py, BARRA_TOL)
     t.barra, t.a = e, a
   end
@@ -805,6 +1070,7 @@ local function fin_drag(cancelar)
       if n then
         aviso("Nodo " .. d.i .. " movido a (" .. fmt(n.x) .. ", " .. fmt(n.y) .. ")" ..
           (recortadas > 0 and ". Se ajustaron cargas" or ""))
+        asegurar_visible(d.i)
       end
     end
   end
@@ -841,6 +1107,7 @@ local function accion_boton(id)
   if id == "r_volver" then H.salir_resultados()
   elseif id == "r_mas" then if not Res.tecla("+") then H.zoom(1.4) end
   elseif id == "r_menos" then if not Res.tecla("-") then H.zoom(1 / 1.4) end
+  elseif id == "r_def" and Res.modo == "def" then Res.toggle_def()
   elseif id:sub(1, 2) == "r_" then Res.set_vista(id:sub(3))
   elseif id == "resolver" then H.resolver()
   elseif id == "undo" then H.deshacer()
@@ -975,18 +1242,31 @@ local AYUDA = {
   "A Apoyo   C Carga   R Resolver",
   "Barra: clic nodo A, clic nodo B...",
   "  (en vacio crea nodos). ESC termina.",
+  "DIVIDIR: con Nodo o Barra, un clic en",
+  "  el interior de una barra crea un nodo",
+  "  y la parte en dos (U deshace).",
   "ENTER: coordenadas exactas o editar.",
   "DEL borra lo seleccionado.",
+  "CARGAS (tecla C, o ENTER con C activa):",
+  "  clic en la barra = lista de cargas:",
+  "  Agregar, Editar o Borrar una a una.",
+  "  Tipos: puntual, w, trapezoidal,",
+  "  momento y Temperatura (du, dg).",
+  "  Clic en un nodo: editar/borrar su carga.",
   "U deshacer   Y rehacer   E encuadrar",
   "+ / -  zoom    flechas: mover vista",
   "G rejilla   K snap   P propiedades",
+  "Q cambia unidades (kN-m, N-m, tf-m);",
+  "  tambien menu Ajustes > Unidades.",
   "M mueve el nodo elegido (clic suelta)",
   "Arrastrar el fondo mueve la vista.",
-  "Menu (tecla menu): Archivo, Vista...",
+  "RESULTADOS: R N V M D T E; 0 o el",
+  "  selector Real / Ampliada (Def).",
+  "Menu (tecla menu): Archivo, Ajustes...",
   "Signos: x derecha, y arriba, giro +",
   "antihorario. Fy < 0 = hacia abajo.",
-  "Unidades: kN, m; E en GPa, A en cm²,",
-  "I en cm4. Supuestos: Euler-Bernoulli,",
+  "El modelo siempre se guarda en kN, m.",
+  "Supuestos: Euler-Bernoulli,",
   "pequenas deformaciones, 2D lineal.",
 }
 
@@ -1027,6 +1307,7 @@ function H.charIn(c)
   elseif k == "k" then H.ciclar_snap()
   elseif k == "x" then H.dialogo_coordenadas()
   elseif k == "p" then H.props_globales()
+  elseif k == "q" then H.ciclar_unidades()
   elseif k == "h" then H.ayuda()
   elseif k == "l" or k == "?" then H.leyenda()
   elseif k == "m" then H.mover_seleccion()
@@ -1053,7 +1334,7 @@ function H.arrow(k)
       ED.ajustar_todas(m)
       return true
     end)
-    if not ok then aviso(msg, true) end
+    if not ok then aviso(msg, true) else asegurar_visible(i) end
   else
     local d = 24
     if k == "left" then V.pan(d, 0) elseif k == "right" then V.pan(-d, 0)
